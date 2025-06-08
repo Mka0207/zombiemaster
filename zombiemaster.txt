@@ -1,0 +1,8 @@
+"zombiemaster"
+{
+	"base"		"base"
+	"title"		"Zombie Master"
+	"maps"		"^zm_"
+	"menusystem"	"1"
+	
+}
