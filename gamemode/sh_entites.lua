@@ -1,70 +1,58 @@
 local meta = FindMetaTable("Entity")
 if not meta then return end
 
-function meta:TakeSpecialDamage(damage, damagetype, attacker, inflictor, hitpos)
-	attacker = attacker or self
-	if not attacker:IsValid() then attacker = self end
-	inflictor = inflictor or attacker
-	if not inflictor:IsValid() then inflictor = attacker end
-
-	local dmginfo = DamageInfo()
-	dmginfo:SetDamage(damage)
-	dmginfo:SetAttacker(attacker)
-	dmginfo:SetInflictor(inflictor)
-	dmginfo:SetDamagePosition(hitpos or self:NearestPoint(inflictor:NearestPoint(self:LocalToWorld(self:OBBCenter()))))
-	dmginfo:SetDamageType(damagetype)
-	self:TakeDamageInfo(dmginfo)
-
-	return dmginfo
+function meta:SetModelDelayed(delay, mdl)
+    timer.Simple(delay, function() if IsValid(self) then self:SetModel(mdl) end end)
 end
 
-function meta:GetHolder()
-	for _, ent in pairs(ents.FindByClass("status_human_holding")) do
-		if ent:GetObject() == self then
-			local owner = ent:GetOwner()
-			if owner:IsPlayer() and owner:Alive() then return owner, ent end
-		end
-	end
+function meta:IsPointInBounds(vecWorldPt)
+    local vecLocalSpace = self:WorldToLocal(vecWorldPt)
+    local m_vecMins = self:OBBMins()
+    local m_vecMaxs = self:OBBMaxs()
+    
+    return (vecLocalSpace.x >= m_vecMins.x and vecLocalSpace.x <= m_vecMaxs.x) and
+            (vecLocalSpace.y >= m_vecMins.y and vecLocalSpace.y <= m_vecMaxs.y) and
+            (vecLocalSpace.z >= m_vecMins.z and vecLocalSpace.z <= m_vecMaxs.z)
 end
 
-function meta:RemoveNextFrame(time)
-	self.Removing = true
-	self:Fire("kill", "", time or 0.01)
+function meta:RandomPointInBounds(vecNormalizedMins, vecNormalizedMaxs)
+    local vecNormalizedSpace = Vector(math.Rand(vecNormalizedMins.x, vecNormalizedMaxs.x), math.Rand(vecNormalizedMins.y, vecNormalizedMaxs.y), math.Rand(vecNormalizedMins.z, vecNormalizedMaxs.z))
+    return self:LocalToWorld(vecNormalizedSpace)
 end
 
-function meta:OwnedByZM()
-	return tobool(string.find(self:GetClass(), "npc_*"))
+function meta:SetClassName(name)
+    self:SetDTString(0, name)
 end
 
-if SERVER then
-	function meta:FireOutput(outpt, activator, caller, args)
-		local intab = self[outpt]
-		if intab then
-			for key, tab in pairs(intab) do
-				local param = ((tab.args == "") and args) or tab.args
-				for __, subent in pairs(self:FindByNameHammer(tab.entityname, activator, caller)) do
-					local delay = tonumber(tab.delay)
-					if delay == nil or delay <= 0 then
-						subent:Input(tab.input, activator, caller, param)
-					else
-						local inp = tab.input
-						timer.Simple(delay, function() if subent:IsValid() then subent:Input(inp, activator, caller, param) end end)
-					end
-				end
-			end
-		end
-	end
+function meta:GetClassName()
+    return self:GetDTString(0)
+end
 
-	function meta:AddOnOutput(key, value)
-		self[key] = self[key] or {}
-		local tab = string.Explode(",", value)
-		table.insert(self[key], {entityname=tab[1], input=tab[2], args=tab[3], delay=tab[4], reps=tab[5]})
-	end
+function meta:GetBonePositionMatrixed(index)
+    local matrix = self:GetBoneMatrix(index)
+    if matrix then
+        return matrix:GetTranslation(), matrix:GetAngles()
+    end
 
-	function meta:FindByNameHammer(name, activator, caller)
-		if name == "!self" then return {self} end
-		if name == "!activator" then return {activator} end
-		if name == "!caller" then return {caller} end
-		return ents.FindByName(name)
-	end
+    return self:GetPos(), self:GetAngles()
+end
+
+function meta:NearestBone(pos)
+    local count = self:GetBoneCount()
+    if count == 0 then return end
+
+    local nearest
+    local nearestdist
+
+    for boneid = 1, count - 1 do
+        local bonepos, boneang = self:GetBonePositionMatrixed(boneid)
+        local dist = bonepos:Distance(pos)
+
+        if not nearest or dist < nearestdist then
+            nearest = boneid
+            nearestdist = dist
+        end
+    end
+
+    return nearest
 end

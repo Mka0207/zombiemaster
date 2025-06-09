@@ -1,162 +1,84 @@
-concommand.Add("printdxinfo", function()
-	print("DX Level: "..tostring(render.GetDXLevel()))
-	print("Supports HDR: "..tostring(render.SupportsHDR()))
-	print("Supports Pixel Shaders 1.4: "..tostring(render.SupportsPixelShaders_1_4()))
-	print("Supports Pixel Shaders 2.0: "..tostring(render.SupportsPixelShaders_2_0()))
-	print("Supports Vertex Shaders 2.0: "..tostring(render.SupportsVertexShaders_2_0()))
-end)
-
-local function GetViewModelPosition(self, pos, ang)
-	return pos + ang:Forward() * -256, ang
-end
-
-function DontDrawViewModel()
-	if SWEP then
-		SWEP.GetViewModelPosition = GetViewModelPosition
-	end
-end
-
--- Scales the screen based around 1080p but doesn't make things TOO tiny on low resolutions.
-function BetterScreenScale()
-	return math.Clamp(ScrH() / 1080, 0.6, 1)
-end
-
-function render.GetLightRGB(pos)
-	local vec = render.GetLightColor(pos)
-	return vec.r, vec.g, vec.b
-end
-
-function EasyLabel(parent, text, font, textcolor)
-	local dpanel = vgui.Create("DLabel", parent)
-	if font then
-		dpanel:SetFont(font or "DefaultFont")
-	end
-	dpanel:SetText(text)
-	dpanel:SizeToContents()
-	if textcolor then
-		dpanel:SetTextColor(textcolor)
-	end
-	dpanel:SetKeyboardInputEnabled(false)
-	dpanel:SetMouseInputEnabled(false)
-
-	return dpanel
-end
-
-function EasyButton(parent, text, xpadding, ypadding)
-	local dpanel = vgui.Create("DButton", parent)
-	if textcolor then
-		dpanel:SetFGColor(textcolor or color_white)
-	end
-	if text then
-		dpanel:SetText(text)
-	end
-	dpanel:SizeToContents()
-
-	if xpadding then
-		dpanel:SetWide(dpanel:GetWide() + xpadding * 2)
-	end
-
-	if ypadding then
-		dpanel:SetTall(dpanel:GetTall() + ypadding * 2)
-	end
-
-	return dpanel
-end
-
 function draw.OutlinedBox( x, y, w, h, thickness, clr )
-	surface.SetDrawColor( clr )
-	for i=0, thickness - 1 do
-		surface.DrawOutlinedRect( x + i, y + i, w - i * 2, h - i * 2 )
-	end
+    surface.SetDrawColor( clr )
+    for i=0, thickness - 1 do
+        surface.DrawOutlinedRect( x + i, y + i, w - i * 2, h - i * 2 )
+    end
 end
 
 function draw.DrawSimpleRect(x, y, w, h, col)
-	surface.SetDrawColor(col)
-	surface.DrawRect(x, y, w, h)
+    surface.SetDrawColor(col)
+    surface.DrawRect(x, y, w, h)
 end
 
 function draw.DrawSimpleOutlined(x, y, w, h, col)
-	surface.SetDrawColor(col)
-	surface.DrawOutlinedRect(x, y, w, h)
+    surface.SetDrawColor(col)
+    surface.DrawOutlinedRect(x, y, w, h)
 end
 
-function draw.DrawDoubleOutlined(x, y, w, h, col)
-	surface.SetDrawColor(col)
-	surface.DrawOutlinedRect(x, y, w, h)
-	surface.DrawOutlinedRect(x + 1, y + 1, w - 2, h - 2)
+local Tex_Corner8 = surface.GetTextureID( "gui/corner8" )
+local Tex_Corner16 = surface.GetTextureID( "gui/corner16" )
+function draw.RoundedBoxHollow(bordersize, x, y, w, h, color)
+    local bordersize2 = bordersize - 1 -- Gives slightly rounded inner corners
+
+    x = math.Round( x )
+    y = math.Round( y )
+    w = math.Round( w )
+    h = math.Round( h )
+
+    surface.SetDrawColor( color.r, color.g, color.b, color.a )
+
+    -- Draw as much of the rect as we can without textures
+    surface.DrawRect( x + bordersize2, y, w - bordersize2 * 2, bordersize2 ) -- Top line
+    surface.DrawRect( x + bordersize2, y+h-bordersize2, w - bordersize2 * 2, bordersize2 ) -- Bottom line
+    surface.DrawRect( x, y + bordersize2, bordersize2, h - bordersize2 * 2 ) -- Left line
+    surface.DrawRect( x + w - bordersize2, y + bordersize2, bordersize2, h - bordersize2 * 2 ) -- Right line
+
+    local tex = Tex_Corner8
+    if ( bordersize > 8 ) then tex = Tex_Corner16 end
+
+    surface.SetTexture( tex )
+
+    surface.DrawTexturedRectUV( x, y, bordersize, bordersize, 0, 0, 1, 1 ) -- Top left corner
+    surface.DrawTexturedRectUV( x + w - bordersize, y, bordersize, bordersize, 1, 0, 0, 1 ) -- Top right corner
+    surface.DrawTexturedRectUV( x, y + h -bordersize, bordersize, bordersize, 0, 1, 1, 0 ) -- Bottom left corner
+    surface.DrawTexturedRectUV( x + w - bordersize, y + h - bordersize, bordersize, bordersize, 1, 1, 0, 0 ) -- Bottom right corner
 end
 
-function draw.DrawTexture(x, y, w, h, color, texture)
-	surface.SetDrawColor(color)
-	surface.SetTexture(texture)
-	surface.DrawTexturedRect(x, y, w, h)
+local colBlur = Color(0, 0, 0)
+function draw.SimpleTextBlurry(text, font, x, y, col, xalign, yalign, fadestart, fadetime)
+    colBlur.r = col.r
+    colBlur.g = col.g
+    colBlur.b = col.b
+    colBlur.a = col.a * math.Rand(0.35, 0.6)
+    
+    draw.SimpleText(text, font.."_blur3", x, y, colBlur, xalign, yalign)
+    draw.SimpleTextOutlined(text, font, x, y, col, xalign, yalign, 1, color_black)
+    
+    if fadetime and fadetime > CurTime() then
+        local dur = (fadetime - CurTime()) * 0.5
+        local hurttime = CurTime() - fadestart
+        local blurpoint = 10
+        if dur - hurttime < (dur * 0.5) then
+            blurpoint = (dur - hurttime) / (dur * 0.25)
+            blurpoint = math.Clamp(math.floor(blurpoint * 6), 1, 10)
+        end
+        
+        draw.SimpleText(text, font.."_blur"..blurpoint, x, y, colBlur, xalign, yalign)
+    end
 end
 
-draw.SimpleRect = draw.DrawSimpleRect
-draw.SimpleOutlined = draw.DrawSimpleOutlined
-draw.DoubleOutlined = draw.DrawDoubleOutlined
-
-function draw.DrawProgressBar(x, y, w, h, progress)
-	local maxWidth = progress
-	
-	if progress >= (w - 4) then
-		maxWidth = w - 4
-	end
-	
-	draw.DrawSimpleRect(x +2, y +2, maxWidth, h -4, Color(221, 181, 0, 255))
-	draw.DrawSimpleOutlined(x, y, w, h, Color(221, 181, 0, 255))
+surface.OldCreateFont = surface.OldCreateFont or surface.CreateFont
+function surface.CreateFont(fontName, fontData)
+    surface.OldCreateFont(fontName, fontData)
+    
+    for i=1, 10 do 
+        local blurfont = fontData
+        local blurname = fontName.."_blur"..i
+        blurfont.blursize = i
+        surface.OldCreateFont(blurname, blurfont)
+    end
 end
 
-function util.GetTextSize(font, text)
-	surface.SetFont(font)
-	return surface.GetTextSize(text)
-end
-
-function util.simpleLabel(parent, title, col, font, x, y)
-	local DLabel = nil
-	
-	if parent then
-		DLabel = vgui.Create("DLabel", parent)
-	else
-		DLabel = vgui.Create("DLabel")
-	end
-	
-	if x and y then
-		DLabel:SetPos(x, y)
-	end
-	
-	if col then
-		DLabel:SetColor(col)
-	end
-	
-	DLabel:SetText(title)
-	DLabel:SetFont(font)
-	DLabel:SizeToContents()
-	
-	return DLabel
-end
-
-function util.simpleButton(parent, x, y, w, h, text, disabled, func)
-	local DButton = nil
-	
-	if parent then
-		DButton = vgui.Create("DButton", parent)
-	else
-		DButton = vgui.Create("DButton")
-	end
-	
-	DButton:SetText(text)
-	
-	if w and h then
-		DButton:SetSize(w, h)
-	end
-	
-	if x and y then
-		DButton:SetPos(x, y)
-	end
-	
-	DButton:SetDisabled(disabled)
-	DButton.DoClick = func
-	
-	return DButton
+function ScaleNumberByResolution(res, num)
+    return res * (num / res)
 end

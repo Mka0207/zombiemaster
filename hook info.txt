@@ -1,0 +1,121 @@
+=SHARED=
+Hook. Used to setup zombie tables for the spawn menu
+GM:BuildZombieDataTable()
+
+Hook. Called by scoreboard to draw a special icon for a player
+GM:IsSpecialPerson(Player ply, Panel image)
+
+Hook. Used to determine if the spawn node can spawn the zombie class
+GM:CanSpawnZombie(int flag, int zombieflags)
+
+Hook. Called when the round restarts
+GM:RestartRound()
+
+Hook. Used to setup NW2Var callbacks
+GM:SetupNetworkingCallbacks()
+
+Hook. Used for checking if the spawn location for a hidden spawn is valid
+Returns Boolean, String (if false this will be used, it needs to be a translated message value), Table (Needs to be the trace table used)
+GM:CanHiddenZombieBeCreated(Player ply, Vector pos, Vector mousepos)
+
+=CLIENT=
+Hook. Returning true will stop the original hook for the power from being added and allow for custom hooks.
+Possible powers are (Shockwave, Hidden, Ambush, Rally, Trap)
+GM:OverridePowerHooks(power)
+
+Hook. Used to generate a table for use with GM:AddQuadDraw
+GM:GenerateClickedQuadTable(IMaterial mat, Number endtime, Vector aimvector, function/table filter)
+
+Hook. Used to add a table for drawing a quad (Used with selections and etc)
+GM:AddQuadDraw(Table tab)
+
+Hook. Used for the selection trace to select nodes (Traps/Zombie Spawns).
+GM:ShouldSelectionIgnoreEnt(Entity ent)
+
+Hook. Used to spawn the trap GUI for the Zombie Master
+GM:SpawnTrapMenu()
+
+Hook. Called when you click a person's name in the scoreboard.
+GM:ClickedPlayerButton(Player ply, Panel panel)
+
+Hook. Gets the current zombie squads for the Zombie Master
+GM:GetCurrentZombieGroups()
+
+Hook. Gets the current selected zombie squad
+GM:GetCurrentZombieGroup()
+
+Hook. Used to get all zombie spawn panels
+GM:GetZombieMenus()
+
+Hook. Used to remove all spawn panels
+GM:ResetZombieMenus()
+
+Hook. Checks if any menu is open and if so does not scroll your screen
+GM:IsMenuOpen()
+
+Hook. Called after the client has fully loaded or on LUA refresh (Called after InitPostEntity)
+GM:PostClientInit()
+
+Hook. Called when the player changes screen resolution
+GM:OnScreenSizeChange(int new_w, int new_h)
+
+Hook. Called to remove the panels spawned by the ZM
+GM:RemoveZMPanels()
+
+=SERVER=
+Hook. Called after the gamemode loads and sets map entites
+GM:InitPostEntityMap()
+
+Hook. Called when a team has won the game (Won is true if humans won and false if Zombie Master won)
+GM:TeamVictorious(bool Won, string Message)
+
+Hook. Used the increment the round counter
+GM:IncrementRoundCount()
+
+Hook. Loads the next map in rotation (Override this for mapvotes)
+GM:LoadNextMap()
+
+Hook. Determines if the map should change or the round restart
+GM:FinishingRound(bool Won, int Rounds)
+
+Hook. Zombie Master setup, gets the player and sets up various settings
+GM:SetupZombieMasterVolunteers(bool bSkipToSelection)
+
+Hook. Sets the current player to a ZM
+GM:SetPlayerToZombieMaster(player pl)
+
+Hook. Gets the population cost of the entity
+GM:GetPopulationCost(string entName)
+
+Hook. Sets the current zombie population
+GM:SetCurZombiePop(int amount)
+
+Hook. Used to spawn a zombie at the origin and angle
+GM:SpawnZombie(player pZM, string entname, vector origin, angles angles, int cost)
+
+Hook. Called before the round restarts
+GM:PreRestartRound()
+
+Hook. Used to setup the player for survivors
+GM:SetupPlayer(player ply)
+
+Hook. Called when the client has loaded
+GM:InitClient(player ply)
+
+Hook. Called after the client has fully loaded
+GM:InitPostClient(player ply)
+
+Hook. Called when the player class is being changed
+GM:OnPlayerClassChanged(player pl, string classname)
+
+Hook. Gets a random player to become the Zombie Master
+GM:GetZombieMasterVolunteer()
+
+Hook. Adds all the friend relationships defined in the zombies Friends table
+GM:AddNPCFriends(Entity npc, Entity ent)
+
+Hook. Randomly replaces a ent with a item crate based on player count. Class argument is optional
+GM:ReplaceItemWithCrate(Entity ent, String class)
+
+Hook. Sets the current players player_class to classname and calls OnPlayerClassChanged
+GM:PlayerSetClass(player ply, string classname)

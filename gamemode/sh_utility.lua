@@ -1,67 +1,246 @@
--- Original code from Zombie Survival by Jetboom
+local function GetXPosition(x, width, totalWidth)
+    local xPos
+    if x == -1 then
+        xPos = (ScrW() - width) / 2
+    else
+        if x < 0 then
+            xPos = (1.0 + x) * ScrW() - totalWidth
+        else
+            xPos = x * ScrW()
+        end
+    end
 
-function TrueVisibleFilters(posa, posb, ...)
-	local filt = ents.FindByClass("projectile_*")
-	filt = table.Add(filt, player.GetAll())
-	if ... ~= nil then
-		for k, v in pairs({...}) do
-			filt[#filt + 1] = v
-		end
-	end
+    if xPos + width > ScrW() then
+        xPos = ScrW() - width
+    elseif xPos < 0 then
+        xPos = 0
+    end
 
-	return not util.TraceLine({start = posa, endpos = posb, filter = filt, mask = MASK_SHOT}).Hit
+    return xPos
+end
+local function GetYPosition(y, height)
+    local yPos
+    if y == -1 then
+        yPos = (ScrH() - height) * 0.5
+    else
+        if y < 0 then
+            yPos = (1.0 + y) * ScrH() - height
+        else
+            yPos = y * ScrH()
+        end
+    end
+
+    if yPos + height > ScrH() then
+        yPos = ScrH() - height
+    elseif yPos < 0 then
+        yPos = 0
+    end
+
+    return yPos
+end
+function util.PrintMessage(uname, pl, tab)
+    if type(tab) ~= "table" or tab.Message == nil then
+        error("Argument #3 was not a table or the message was nil.")
+    end
+    
+    if SERVER then
+        net.Start("zm_coloredprintmessage")
+            net.WriteString(uname)
+            net.WriteTable(tab)
+        if IsValid(pl) then net.Send(pl) else net.Broadcast() end
+        
+        return
+    end
+
+    if not tab.Font then
+        tab.Font = "zm_game_text"
+    end
+    
+    if not GAMEMODE.ParsedTextObjects then
+        GAMEMODE.ParsedTextObjects = {}
+    end
+    
+    GAMEMODE.ParsedTextObjects[uname] = {
+        Message = tab.Message,
+        Font = tab.Font,
+        HoldTime = tab.HoldTime or 0.5,
+        Duration = (tab.HoldTime + tab.FadeInTime + tab.FadeOutTime) or 5,
+        FadeIn = tab.FadeInTime or 0,
+        FadeOut = tab.FadeOutTime or 0,
+        XFactor = tab.XPos or 0.5,
+        YFactor = tab.YPos or 0.1,
+        Color1 = tab.Color1 or color_white,
+        Color2 = tab.Color2 or color_white,
+        EffectType = tab.Effect or 0,
+        FXTime = tab.FXTime or 0,
+        StartTime = CurTime()
+    }
+    
+    for HookName, Object in pairs(GAMEMODE.ParsedTextObjects) do
+        if uname ~= HookName and Object.XFactor == tab.XPos and Object.YFactor == tab.YPos then
+            GAMEMODE.ParsedTextObjects[HookName] = nil
+            hook.Remove("HUDPaint", HookName)
+            
+            GAMEMODE.ParsedTextObjects[uname].FadeIn = 0
+        end
+    end
+    
+    local function drawToScreen()
+        local tab = GAMEMODE.ParsedTextObjects[uname]
+        if not tab then
+            hook.Remove( "HUDPaint", uname )
+            return
+        end
+        
+        local msg = tab.Message
+        local bScan = tab.EffectType >= 2
+        local dtime = CurTime() - tab.StartTime
+        local fadein = tab.FadeIn
+        local fadeout = tab.FadeOut
+
+        surface.SetFont(tab.Font)
+        local w, h = surface.GetTextSize(tab.Message)
+        local x, y = GetXPosition(tab.XFactor, w, w), GetYPosition(tab.YFactor, h)
+        
+        if bScan then
+            local fadeTime = (fadein * #msg) + tab.HoldTime
+            local fadeBlend = 0
+            
+            if dtime > fadeTime and fadeout > 0 then
+                fadeBlend = ((dtime - fadeTime) / fadeout) * 255
+            else
+                fadeBlend = 0
+            end
+            
+            local charTime = 0
+            local blend = 0
+            local srcRed, srcGreen, srcBlue = tab.Color1.r, tab.Color1.g, tab.Color1.b
+            local destRed, destGreen, destBlue = 0, 0, 0
+            local color = Color(0, 0, 0)
+            for i = 1, #msg do
+                charTime = charTime + fadein
+                if charTime > dtime then
+                    srcRed, srcGreen, srcBlue = 0, 0, 0 
+                    blend = 0
+                else
+                    local deltaTime = dtime - charTime
+
+                    destRed, destGreen, destBlue = 0, 0, 0
+                    if dtime > fadeTime then
+                        blend = fadeBlend
+                    elseif deltaTime > tab.FXTime then
+                        blend = 0
+                    else
+                        destRed = tab.Color2.r
+                        destGreen = tab.Color2.g
+                        destBlue = tab.Color2.b
+                        blend = 255 - (deltaTime * (1/tab.FXTime) * 255 + 0.5)
+                    end
+                end
+                
+                blend = math.Clamp(blend, 0, 255)
+                fadeBlend = math.Clamp(fadeBlend, 0, 255)
+
+                color.r = bit.rshift((srcRed * (255-blend)) + (destRed * blend), 8)
+                color.g = bit.rshift((srcGreen * (255-blend)) + (destGreen * blend), 8)
+                color.b = bit.rshift((srcBlue * (255-blend)) + (destBlue * blend), 8)
+                
+                local w, h = surface.GetTextSize(string.sub(msg, 1, i - 1))
+
+                surface.SetTextColor(0, 0, 0, color == color_black and 0 or 255 - fadeBlend)
+                for _x = -1, 1 do
+                    for _y = -1, 1 do
+                        surface.SetTextPos((x + _x) + w, y + _y)
+                        surface.DrawText(string.sub(msg, i, i))
+                    end
+                end
+                
+                surface.SetTextColor(color.r, color.g, color.b, color == color_black and 0 or 255 - fadeBlend)
+                surface.SetTextPos(x + w, y)
+                surface.DrawText(string.sub(msg, i, i))
+                
+                if fadeBlend == 255 then
+                    GAMEMODE.ParsedTextObjects[uname] = nil
+                    hook.Remove( "HUDPaint", uname )
+                end
+            end
+        else
+            local dur = tab.Duration
+            local alpha = 255
+            
+            if dtime > dur then
+                GAMEMODE.ParsedTextObjects[uname] = nil
+                hook.Remove( "HUDPaint", uname )
+                return
+            end
+
+            if fadein - dtime > 0 then
+                alpha = (fadein - dtime) / fadein
+                alpha = 1 - alpha
+                alpha = alpha * 255
+            end
+
+            if dur - dtime < fadeout then
+                alpha = (dur - dtime) / fadeout
+                alpha = alpha * 255
+            end
+
+            surface.SetTextColor(0, 0, 0, alpha)
+            for _x = -1, 1 do
+                for _y = -1, 1 do
+                    surface.SetTextPos(x + _x, y + _y)
+                    surface.DrawText(msg)
+                end
+            end
+            
+            surface.SetTextColor(tab.Color1.r, tab.Color1.g, tab.Color1.b, alpha)
+            surface.SetTextPos(x, y)
+            surface.DrawText(msg)
+        end
+    end
+    hook.Add("HUDPaint", uname, drawToScreen)
+    
+    return GAMEMODE.ParsedTextObjects[uname]
 end
 
-function CosineInterpolation(y1, y2, mu)
-	local mu2 = (1 - math.cos(mu * math.pi)) / 2
-	return y1 * (1 - mu2) + y2 * mu2
+function util.PrintMessageBold(uname, tab)
+    return util.PrintMessage(uname, nil, tab)
 end
 
--- I had to make this since the default function checks visibility vs. the entitiy's center and not the nearest position.
-function util.BlastDamageEx(inflictor, attacker, epicenter, radius, damage, damagetype)
-	local filter = inflictor
-	for _, ent in pairs(ents.FindInSphere(epicenter, radius)) do
-		if ent and ent:IsValid() then
-			local nearest = ent:NearestPoint(epicenter)
-			if TrueVisibleFilters(epicenter, nearest, inflictor, ent) then
-				ent:TakeSpecialDamage(((radius - nearest:Distance(epicenter)) / radius) * damage, damagetype, attacker, inflictor, nearest)
-			end
-		end
-	end
+if not CLIENT then return end
+
+local function ZoneSelect(x1, y1, x2, y2)
+    local SelectedZombies = {}
+    for _, npc in pairs(ents.FindByClass("npc_*")) do
+        local npc_spos = npc:WorldSpaceCenter():ToScreen()
+        if (npc_spos.x > x1 and npc_spos.x < x2 and npc_spos.y > y1 and npc_spos.y < y2) then
+            SelectedZombies[#SelectedZombies + 1] = npc
+        end
+    end
+    
+    net.Start("zm_boxselect")
+        net.WriteBool(LocalPlayer().bAddSelection)
+        net.WriteTable(SelectedZombies)
+    net.SendToServer()
 end
+function util.BoxSelect(x, y)
+    local topleft_x, topleft_y, botright_x, botright_y
 
-function util.BlastDamage2(inflictor, attacker, epicenter, radius, damage)
-	util.BlastDamageEx(inflictor, attacker, epicenter, radius, damage, DMG_BLAST)
-end
+    if LocalPlayer().DragX < x then
+        topleft_x = LocalPlayer().DragX
+        botright_x = x
+    else
+        topleft_x = x
+        botright_x = LocalPlayer().DragX
+    end
 
-function util.FindValidInSphere(pos, radius)
-	local ret = {}
-	
-	for _, ent in pairs(util.FindInSphere(pos, radius)) do
-		if ent and ent:IsValid() then
-			ret[#ret + 1] = ent
-		end
-	end
+    if LocalPlayer().DragY < y then
+        topleft_y = LocalPlayer().DragY
+        botright_y = y
+    else
+        topleft_y = y
+        botright_y = LocalPlayer().DragY
+    end
 
-	return ret
-end
-
-function util.RemoveAll(class)
-	for _, ent in pairs(ents.FindByClass(class)) do
-		ent:Remove()
-	end
-end
-
-function AccessorFuncDT(tab, membername, type, id)
-	local emeta = FindMetaTable("Entity")
-	local setter = emeta["SetDT"..type]
-	local getter = emeta["GetDT"..type]
-
-	tab["Set"..membername] = function(me, val)
-		setter(me, id, val)
-	end
-
-	tab["Get"..membername] = function(me)
-		return getter(me, id)
-	end
+    ZoneSelect(topleft_x, topleft_y, botright_x, botright_y)
 end
