@@ -4,7 +4,7 @@
 	"title"		"Zombie Master"
 	"maps"		"^zm_"
 	"menusystem"	"1"
-	"workshopid"	"591300663"
+	"workshopid"	"3577037234"
 
 	"author_name"		"ForrestMarkX"
 	"author_email"		"forrestmarkx@outlook.com"
