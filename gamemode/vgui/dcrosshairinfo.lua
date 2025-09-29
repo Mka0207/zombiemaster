@@ -71,6 +71,11 @@ function PANEL:Init()
 end
 
 function PANEL:Think()
+    if not MySelf:IsSurvivor() then
+        self:Remove()
+        return
+    end
+    
     // see if we should fade in/out
     local bFadeOut = false
 
@@ -146,17 +151,10 @@ end
 
 local scalar = 138.0 / 255.0
 local hud_quickinfo = GetConVar("hud_quickinfo")
-
 function PANEL:Paint(w, h)
-    if not hook.Run("HUDShouldDraw", "CHudQuickInfo") then
-        return
-    end
+    if not hud_quickinfo:GetBool() then return end
 
-    if hud_quickinfo:GetInt() == 0 then
-        return
-    end
-
-    local player = LocalPlayer()
+    local player = MySelf
 
     local weapon = player:GetActiveWeapon()
 

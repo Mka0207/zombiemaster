@@ -1,0 +1,14 @@
+"VertexLitGeneric"
+{
+	$baseTexture 			"models\weapons\zs\m590\cruiser"
+	$bumpmap 			"models\weapons\zs\m590\cruiser_normal"
+	$envmap 			env_cubemap
+	$normalmapalphaenvmapmask 	1
+	$envmaptint			"[0.01 0.01 0.01]"
+	$normalmapalphaphongmask 	1
+ 	$phong 				1
+	$phongtint			"[0.7 0.9 1]"
+	$phongboost 			1
+	$phongfresnelranges 		"[.2 .4 1]"
+	$phongalbedotint 		1
+}

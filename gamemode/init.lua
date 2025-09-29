@@ -1,30 +1,45 @@
+resource.AddWorkshop("2330687046")
+
 AddCSLuaFile("cl_init.lua")
 AddCSLuaFile("shared.lua")
 
 AddCSLuaFile("cl_credits.lua")
+AddCSLuaFile("cl_deathnotice.lua")
 AddCSLuaFile("cl_killicons.lua")
 AddCSLuaFile("cl_utility.lua")
 AddCSLuaFile("cl_scoreboard.lua")
 AddCSLuaFile("cl_dermaskin.lua")
+AddCSLuaFile("cl_halo.lua")
+AddCSLuaFile("cl_sck.lua")
 
 AddCSLuaFile("cl_hud.lua")
 AddCSLuaFile("cl_zombie.lua")
 AddCSLuaFile("cl_powers.lua")
 
+AddCSLuaFile("nixthelag.lua")
+AddCSLuaFile("buffthefps.lua")
+AddCSLuaFile("sh_string.lua")
+AddCSLuaFile("sh_math.lua")
+AddCSLuaFile("sh_vector.lua")
 AddCSLuaFile("sh_weapons.lua")
 AddCSLuaFile("sh_players.lua")
 AddCSLuaFile("sh_entites.lua")
 AddCSLuaFile("sh_zombies.lua")
 AddCSLuaFile("sh_npc.lua")
+AddCSLuaFile("sh_animations.lua")
 
 AddCSLuaFile("sh_sounds.lua")
 AddCSLuaFile("sh_zm_globals.lua")
 AddCSLuaFile("sh_utility.lua")
 AddCSLuaFile("sh_zm_options.lua")
 
+AddCSLuaFile("sh_playeroptimization.lua")
+
 AddCSLuaFile("cl_zm_options.lua")
 AddCSLuaFile("cl_targetid.lua")
 AddCSLuaFile("cl_entites.lua")
+AddCSLuaFile("cl_team.lua")
+AddCSLuaFile("cl_collision.lua")
 
 AddCSLuaFile("vgui/dmainhud.lua")
 AddCSLuaFile("vgui/dteamheading.lua")
@@ -36,26 +51,58 @@ AddCSLuaFile("vgui/dcrosshairinfo.lua")
 AddCSLuaFile("vgui/dhintpanel.lua")
 AddCSLuaFile("vgui/dlobby.lua")
 AddCSLuaFile("vgui/dhealthhud.lua")
+AddCSLuaFile("vgui/dexnotificationslist.lua")
+AddCSLuaFile("vgui/dflashlighthud.lua")
+AddCSLuaFile("vgui/doxygenhud.lua")
+AddCSLuaFile("vgui/dreloadhud.lua")
 
+--include("sv_math_counter.lua")
+include("sv_team.lua")
 include("sv_zm_options.lua")
 include("sh_players.lua")
 include("sv_players.lua")
 include("sv_entites.lua")
 include("sv_npc.lua")
+include("sv_weapons.lua")
+include("sv_vault.lua")
+include("sv_collision.lua")
+include("sv_modulewrapper.lua")
+--include("sv_playerdamage.lua")
 include("shared.lua")
 
 include("modules/zombie_master_ai/sv_bot.lua")
+include("modules/navmesh_check/sv_navmesh_check.lua")
+
+include("sv_clientside_reg.lua")
 
 DEFINE_BASECLASS("gamemode_base")
 
 GM.DeadPlayers = {}
-GM.DontConvertProps = true
-GM.PlayerHeldObjects = {}
 GM.ZombieMasterPriorities = {}
 
 GM.Income_Time = 0
 
-local playerReadyList = {}
+local ZEPLUGINS, _ = pcall(require, "zeplugins")
+if ZEPLUGINS then
+	MsgN("[ZE PLUGINS]: Loaded")
+	-- FIX FilterTeam crash the server due to NULL pointer.
+	-- FIX GameUI jittery movements due to lag compensation.
+	-- ADD NoShake to disable env_shake.
+	-- Access C++ Math counter
+	-- Correct time in every Think
+	-- CSViewOffset [Moved to zsutil]
+	-- ResetCrouch, this is force reset crouch after unduck jump... thanks you valve bruh moment...
+	-- Manual calling general Phys Simulate such as like controller for all bosses and props... not sure about players.
+	-- without this module phys simulate on controller doesnt work if there is m_forcetime > 0 because one frame was behind.
+
+	if ZEPLUGIN_DetourPhysicsHook then
+		ZEPLUGIN_DetourPhysicsHook(false) -- we dont want to use lua physframe.
+	end
+end
+
+local OldTriggerOutput
+local OldStoreOutput
+local PlayerReadyList = {}
 
 if file.Exists(GM.FolderName.."/gamemode/maps/"..game.GetMap()..".lua", "LUA") then
     include("maps/"..game.GetMap()..".lua")
@@ -67,10 +114,94 @@ function BroadcastLua(str)
     net.Broadcast()
 end
 
+-- Many maps expect the outputs to start from 0 to the end, Garrys Mod seems to do the opposite of that
+local function FireSingleOutput(output, this, activator, data, entitiesToFire)
+	if output.times == 0 then return false end
+
+	for _, ent in ipairs(entitiesToFire) do
+        if output.delay == 0 then
+            if IsValid(ent) then
+                ent:Input(output.input, activator, this, data or output.param)
+            end
+        else
+            timer.Simple(output.delay, function()
+                if ent:IsValid() and ent:GetClass() == "physics_cannister" and output.input == "Explode" then
+                    ent:Remove()
+                    return
+                end
+
+                if IsValid(ent) then
+                    ent:Input(output.input, activator, this, data or output.param)
+                end
+            end)
+        end
+	end
+
+	if output.times ~= -1 then
+		output.times = output.times - 1
+	end
+
+	return output.times > 0 or output.times == -1
+end
+local EntFireCount = {}
+local function OutputQueue(name, idx, output, this, activator, data)
+    if not (this and this:IsValid()) or not output or (EntFireCount[this] and EntFireCount[this] > 2) then
+        EntFireCount[this] = nil
+        return
+    end
+
+    local entitiesToFire = {}
+    if output.entities == "!activator" then
+        entitiesToFire = { activator }
+    elseif output.entities == "!self" then
+        entitiesToFire = { this }
+    elseif output.entities == "!player" then
+        entitiesToFire = player.GetAllNoCopy()
+    else
+        entitiesToFire = ents.FindByName( output.entities )
+        if #entitiesToFire == 0 and output.entities ~= "" then
+            -- Prevent infinite loops!
+            EntFireCount[this] = (EntFireCount[this] or 0) + 1
+
+            timer.Simple(0, function() OutputQueue(name, idx, output, this, activator, data) end)
+            return
+        end
+    end
+
+    EntFireCount[this] = nil
+
+    if not FireSingleOutput(output, this.Entity, activator, data, entitiesToFire) then
+        this.m_tOutputs[ name ][ idx ] = nil
+    end
+end
+function TriggerOutputOverride(ent, name, activator, data)
+    if string.len(data) == 0 then
+        data = nil
+    end
+
+    if GAMEMODE.bUseOriginalTriggerOutput then
+        OldTriggerOutput(ent, name, activator, data)
+        return
+    end
+
+	if not ent.m_tOutputs then return end
+	if not ent.m_tOutputs[name] then return end
+
+	local OutputList = ent.m_tOutputs[ name ]
+	for idx, output in ipairs(OutputList) do
+        OutputQueue(name, idx, output, ent, activator, data)
+	end
+end
+
+function GM:PreGamemodeLoaded()
+    OldTriggerOutput = scripted_ents.Get("base_entity").TriggerOutput
+    OldStoreOutput = scripted_ents.Get("base_entity").StoreOutput
+end
+
 function GM:InitPostEntity()
     RunConsoleCommand("mapcyclefile", "mapcycle_zombiemaster.txt")
     hook.Call("InitPostEntityMap", self)
-    
+
     local ammotbl = hook.Call("GetCustomAmmo", self)
     if table.Count(ammotbl) > 0 then
         for _, ammo in pairs(ammotbl) do
@@ -78,52 +209,81 @@ function GM:InitPostEntity()
             game.AddAmmoType({name = ammo.Type, dmgtype = ammo.DmgType, tracer = ammo.TracerType, plydmg = 0, npcdmg = 0, force = 2000, maxcarry = ammo.MaxCarry})
         end
     end
+
+    local Settings = physenv.GetPerformanceSettings()
+    Settings.MaxCollisionsPerObjectPerTimestep = 10
+    Settings.MaxCollisionChecksPerTimestep = 200
+    Settings.MaxVelocity = 2000
+    Settings.MaxAngularVelocity = 360 * 10
+    Settings.LookAheadTimeObjectsVsWorld = 1
+    Settings.LookAheadTimeObjectsVsObject = 0.5
+    Settings.MinFrictionMass = 10
+    Settings.MaxFrictionMass = 2500
+
+    physenv.SetPerformanceSettings(Settings)
 end
 
 function GM:InitPostEntityMap()
     self:SetupAmmo()
-    
-    if not self.DontConvertProps then
-        for _, ent in pairs(ents.FindByClass("prop_physics")) do
-            self:ConvertEntTo(ent, "prop_physics_multiplayer")
-        end
-        
-        for _, ent in pairs(ents.FindByClass("func_physbox")) do
-            self:ConvertEntTo(ent, "func_physbox_multiplayer")
-        end
-    end
-    
-    for _, ent in pairs(ents.GetAll()) do
+
+    for _, ent in ipairs(ents.FindByClass("weapon_*")) do
         if string.sub(ent:GetClass(), 1, 9) == "weapon_zm" then
             local owner = ent:GetOwner()
             if IsValid(owner) and owner:IsPlayer() then continue end
-            
+
             hook.Call("ReplaceItemWithCrate", self, ent)
-            
+
             if IsValid(ent) then
                 hook.Call("CreateCustomWeapons", self, ent)
             end
         elseif string.sub(ent:GetClass(), 1, 7) == "weapon_" then
             local owner = ent:GetOwner()
             if IsValid(owner) and owner:IsPlayer() then continue end
-            
+
             self:ConvertWeapon(ent)
-        elseif string.sub(ent:GetClass(), 1, 10) == "item_ammo_" or string.sub(ent:GetClass(), 1, 9) == "item_box_" then
+        end
+    end
+
+    for _, ent in ipairs(ents.FindByClass("item_*")) do
+        if string.sub(ent:GetClass(), 1, 10) == "item_ammo_" or string.sub(ent:GetClass(), 1, 9) == "item_box_" then
             self:ConvertAmmo(ent)
         end
     end
-    
+
     self.bMapWasInitilized = true
 end
 
+function GM:OnPlayerHitGround(ply, inWater, onFloater, speed)
+    local groundent = ply:GetGroundEntity()
+    if IsValid(groundent) then
+        groundent:SetPhysicsAttacker(ply)
+    end
+end
+
+function GM:AcceptInput(ent, input, activator, caller, value)
+    if input == "ForceDrop" then
+        DropEntityIfHeld(ent)
+    end
+end
+
 function GM:EntityKeyValue(ent, key, value)
+    key = string.lower(key)
     if key == "targetname" then
         ent:SetName(value)
     end
-    
-    if ent:GetClass() == "game_text" then
-        if key == "y" and value == "-1" then
-            return "0.85"
+
+    if ent:GetClass() == "game_text" and key == "y" and value == "-1" then
+        return "0.85"
+    end
+
+    if key == "crabcount" then
+        return "0"
+    end
+
+    if ent:IsNPC() and key == "spawnflags" then
+        local tab = self:GetZombieData(ent:GetClass())
+        if tab and tab.SpawnFlags then
+            return tostring(bit.bor(tonumber(value), tab.SpawnFlags))
         end
     end
 end
@@ -131,27 +291,31 @@ end
 function GM:SetupAmmo()
     local ammotbl = ents.FindByClass("item_ammo_*")
     table.Add(ammotbl, ents.FindByClass("item_box_*"))
-    
-    for _, ammo in pairs(ammotbl) do
-        if ammo:GetClass() == "item_ammo_revolver" then continue end
-        
+
+    for _, ammo in ipairs(ammotbl) do
+        if ammo:GetClass() == "item_ammo_revolver" then
+            ammo:SetClassName(ammo:GetClass())
+            continue
+        end
+
         local ammotype = self.AmmoClass[ammo:GetClass()]
         if ammotype then
             local ent = ents.Create("item_zm_ammo")
             if IsValid(ent) then
                 ent:SetPos(ammo:GetPos())
                 ent:SetAngles(ammo:GetAngles())
-                
+
                 ent:SetClassName(ammo:GetClass())
                 ent.Model = ammo:GetModel()
                 ent.AmmoAmount = self.AmmoCache[ammotype]
                 ent.AmmoType = ammotype
+                ent:SetKeyValue("spawnflags", ammo:GetSpawnFlags())
                 ent:Spawn()
-                
+
                 if not self.AmmoModels[ammo:GetClass()] then
                     self.AmmoModels[ammo:GetClass()] = ammo:GetModel()
                 end
-                
+
                 ammo:Remove()
             end
         end
@@ -166,22 +330,22 @@ function GM:ConvertAmmo(ammo)
     if ammotype then
         local ent = ents.Create("item_zm_ammo")
         if IsValid(ent) then
-            hook.Call("ReplaceItemWithCrate", self, ent, ammo:GetClass())
+            hook.Call("ReplaceItemWithCrate", self, ammo, ammo:GetClass())
+            if not IsValid(ammo) then ent:Remove() return end
+
             if IsValid(ent) then
                 ent = hook.Call("CreateCustomAmmo", self, ent)
             else return end
-            
+
             ent:SetPos(ammo:GetPos())
             ent:SetAngles(ammo:GetAngles())
-            
+
             ent:SetClassName(ammo:GetClass())
             ent.Model = self.AmmoModels[ammo:GetClass()]
             ent.AmmoAmount = self.AmmoCache[ammotype]
             ent.AmmoType = ammotype
             ent:Spawn()
-            
-            ent:SetVelocity(ammo:GetVelocity())
-            
+
             ammo:Remove()
         end
     end
@@ -208,7 +372,7 @@ function GM:ConvertWeapon(wep)
         ent:SetPos(wep:GetPos())
         ent:SetAngles(wep:GetAngles())
         ent:Spawn()
-        
+
         wep:Remove()
     end
 end
@@ -223,14 +387,14 @@ function GM:CreateCustomWeapons(ent, bNoSpawn)
                 wep:SetPos(ent:GetPos())
                 wep:SetAngles(ent:GetAngles())
                 if not bNoSpawn then wep:Spawn() end
-                
+
                 ent:Remove()
-                
+
                 return wep
             end
         end
     end
-    
+
     return ent
 end
 
@@ -244,114 +408,134 @@ function GM:CreateCustomAmmo(ent, bNoSpawn)
                 ammoent:SetPos(ent:GetPos())
                 ammoent:SetAngles(ent:GetAngles())
                 if not bNoSpawn then ammoent:Spawn() end
-                
+
                 ent:Remove()
-                
+
                 return ammoent
             end
         end
     end
-    
+
     return ent
 end
 
-local function ShouldAlwaysBeInPVS(ent)
-    return ent:IsPlayer() or ent:IsNPC() or string.sub(ent:GetClass(), 1, 12) == "prop_physics" or string.sub(ent:GetClass(), 1, 12) == "func_physics"
-end
 function GM:OnEntityCreated(ent)
-    if string.sub(ent:GetClass(), 1, 12) == "prop_physics" or string.sub(ent:GetClass(), 1, 12) == "func_physics" then
-        local pos = ent:GetPos()
-        local blockers = 0
-        for k, v in pairs(ents.FindInBox(pos + ent:OBBMins(), pos + ent:OBBMaxs())) do
-            if IsValid(v) then  
-                local phys = v:GetPhysicsObject()
-                if IsValid(phys) and phys:IsMotionEnabled() and v:IsSolid() and v:GetClass() == ent:GetClass() then
-                    blockers = blockers + 1
-                end
-            end
-        end
-        
-        if blockers > 0 then 
-            ent:SetNotSolid(true)
-            timer.Simple(1, function()
-                if not IsValid(ent) then return end
-                ent:SetNotSolid(false)
-            end)
+    local this = ent
+    if this:GetClass() == "npc_headcrab_poison" then
+        this:Remove()
+        return
+    end
 
-            return
+    timer.Simple(0, function()
+        if not IsValid(this) then return end
+
+        if IsValid(ent) and ent:GetModel() == "models/cat/cat_woodencrate_grey.mdl" then
+            ent:SetModel("models/props_junk/wood_crate001a.mdl")
+            ent:SetMaterial("CAT/cat_woodencrate_grey")
         end
-    end
-    
-    if ShouldAlwaysBeInPVS(ent) then
-        timer.Simple(0, function() if IsValid(ent) then ent:AddEFlags(EFL_IN_SKYBOX) end end)
-    end
-    
-    if (string.sub(ent:GetClass(), 1, 9) == "item_ammo" or string.sub(ent:GetClass(), 1, 8) == "item_box") and self.bMapWasInitilized then
+
+        if this:GetMaxHealth() > 1 and this:Health() <= 0 and not this:IsPlayer() and not this:IsNPC() and not this:IsNextBot() and string.sub(this:GetClass(), 0, 5) == "func_" then
+            ent:AddFlags(FL_OBJECT)
+        end
+    end)
+
+    -- Prevent massive lag from vphysics objects colliding with the physics shadow of a func_brush
+    if this:GetClass() == "func_brush" then
         timer.Simple(0, function()
-            self:ConvertAmmo(ent)
+            if not IsValid(this) then return end
+
+            local WasNotSolid = not this:IsSolid()
+
+            this:PhysicsInit(SOLID_VPHYSICS)
+            this:MakePhysicsObjectAShadow(false, false)
+            this:SetMoveType(MOVETYPE_PUSH)
+            this:SetNotSolid(WasNotSolid)
+
+            local phys = this:GetPhysicsObject()
+            if IsValid(phys) then
+                phys:EnableCollisions(not WasNotSolid)
+                phys:EnableMotion(false)
+            end
         end)
     end
-    
-    if ent:IsNPC() then
-        local entclass = ent:GetClass()
-        if self:GetZombieData(entclass) ~= nil then
-            self.iZombieList[ent:EntIndex()] = ent
-        end
-        
-        if string.sub(entclass, 1, 12) == "npc_headcrab" then
-            ent:DrawShadow(false)
-            ent:Remove()
-            return
-        end
-        
+
+    -- ZMRCHANGE: Make sure we do not create bone followers if the value isn't defined in the map data.
+    -- This little fix can save hundreds of edict slots... thanks prop_dynamic ragdolls...
+    if this:GetClass() == "prop_dynamic" then
         timer.Simple(0, function()
-            if not IsValid(ent) then return end
-            
-            if not ent.SpawnedFromNode then
-                ent:SetNW2Bool("bIsEngineNPC", not ent:IsScripted())
-                
-                self:CallZombieFunction(ent, "OnSpawned")
-                self:CallZombieFunction(ent, "SetupModel")
-                self:CallZombieFunction(ent, "SetupCapabilities")
+            if not IsValid(this) then return end
+            this:SetSaveValue("m_bDisableBoneFollowers", true)
+        end)
+    end
+
+    if (string.sub(this:GetClass(), 1, 9) == "item_ammo" or string.sub(this:GetClass(), 1, 8) == "item_box") and self.bMapWasInitilized then
+        timer.Simple(0, function() self:ConvertAmmo(this) end)
+    end
+
+    if this:GetClass() == "raggib" then
+        this:Extinguish()
+        this:SetNoDraw(true)
+        SafeRemoveEntityDelayed(this, 0)
+    end
+
+    if this:IsNPC() or this:IsNextBot() then
+        local entclass = this:GetClass()
+        if self:GetZombieData(entclass) ~= nil then
+            self.iZombieList[this:EntIndex()] = this
+        end
+
+        timer.Simple(0, function()
+            if not IsValid(this) then return end
+
+            if not this.SpawnedFromNode then
+                this:SetEngineNPC(not this:IsScripted())
+
+                self:CallZombieFunction(this, "OnSpawned")
+                self:CallZombieFunction(this, "SetupModel")
+                self:CallZombieFunction(this, "SetupCapabilities")
             end
-            
-            if ent.GetNumBodyGroups and ent.SetBodyGroup then
-                for k = 0, ent:GetNumBodyGroups() - 1 do
-                    ent:SetBodyGroup(k, 0)
+
+            if this.GetNumBodyGroups and this.SetBodyGroup then
+                for k = 0, this:GetNumBodyGroups() - 1 do
+                    this:SetBodyGroup(k, 0)
                 end
             end
-            
-            ent:SetShouldServerRagdoll(false)
+
+            this:SetShouldServerRagdoll(false)
         end)
-        
+
         for index, npc in pairs(self.iZombieList) do
-            hook.Call("AddNPCFriends", self, npc, ent)
+            hook.Call("AddNPCFriends", self, npc, this)
         end
     end
 end
 
 function GM:EntityRemoved(ent)
-    if ent:IsNPC() then
+    if ent:IsNPC() or ent:IsNextBot() then
         table.RemoveByValue(self.iZombieList, ent)
     end
 end
 
 function GM:ReplaceItemWithCrate(ent, class)
     local playercount = player.GetCount()
-    if playercount <= 16 then return end
-    
-    local chance = math.min(playercount / 100, 1) * 2
+    if playercount <= 16 or self.bDisableItemCrateReplacment then return end
+
+    local chance = math.min(playercount / (playercount * 10), 1)
     if math.random() <= chance then
-        local itemcount = math.ceil(playercount / 10)
+        for _, box in ipairs(ents.FindInSphere(ent:WorldSpaceCenter(), 32)) do
+            if box and box:IsValid() and (box:GetClass() == "item_item_crate" or box:IsPlayer() or box:GetClass() == "info_player_deathmatch") then return end
+        end
+
+        local itemcount = math.ceil(playercount * (ent:IsWeapon() and 0.15 or 0.25))
         if itemcount > 1 then
             local crate = ents.Create("item_item_crate")
             if IsValid(crate) then
                 crate:SetPos(ent:GetPos())
                 crate:SetAngles(ent:GetAngles())
-                crate:SetKeyValue("itemclass", tostring(class) or ent:GetClass())
+                crate:SetKeyValue("itemclass", class and tostring(class) or ent:GetClass())
                 crate:SetKeyValue("itemcount", tostring(itemcount))
                 crate:Spawn()
-                
+
                 ent:Remove()
             end
         end
@@ -360,10 +544,10 @@ end
 
 function GM:AddNPCFriends(npc, ent)
     if not (npc and npc:IsValid()) then return end
-    
+
     local zombie = self:GetZombieData(npc:GetClass())
     if not zombie or not zombie.Friends then return end
-    
+
     local zombiefriends = {}
     for _, fri in pairs(zombie.Friends) do
         if fri ~= npc:GetClass() then
@@ -373,7 +557,7 @@ function GM:AddNPCFriends(npc, ent)
             end
         end
     end
-    
+
     for _, zom in pairs(zombiefriends) do
         npc:AddEntityRelationship(zom, D_LI, 99)
     end
@@ -381,20 +565,18 @@ end
 
 function GM:PostGamemodeLoaded()
     self:SetRoundStartTime(5)
-    self:SetRoundStart(true)
     self:SetRoundActive(false)
-    
-    self:AddResources()
 
     util.AddNetworkString("PlayerKilledByNPC")
-    
+
     util.AddNetworkString("zm_trigger")
-    util.AddNetworkString("zm_infostrings")    
+    util.AddNetworkString("zm_infostrings")
     util.AddNetworkString("zm_queue")
     util.AddNetworkString("zm_remove_queue")
     util.AddNetworkString("zm_sendcurrentgroups")
     util.AddNetworkString("zm_sendselectedgroup")
     util.AddNetworkString("zm_spawnclientragdoll")
+    util.AddNetworkString("zm_forcecustomragdoll")
     util.AddNetworkString("zm_coloredprintmessage")
     util.AddNetworkString("zm_place_physexplode")
     util.AddNetworkString("zm_net_power_killzombies")
@@ -423,20 +605,26 @@ function GM:PostGamemodeLoaded()
     util.AddNetworkString("zm_sendlua")
     util.AddNetworkString("zm_playeready")
     util.AddNetworkString("zm_updateclientreadytable")
-    
+    util.AddNetworkString("zm_updateragdollpos")
+    util.AddNetworkString("zm_servertravel")
+    util.AddNetworkString("zm_navloaded")
+    util.AddNetworkString("zm_mousemove")
+
+    util.AddNetworkString("zs_playtaunt")
+
     game.ConsoleCommand("fire_dmgscale 1\nmp_falldamage 1\nsv_gravity 600\n")
-    
+
     local mapinfo = "maps/"..game.GetMap()..".txt"
     if file.Exists(mapinfo, "GAME") then
         self.MapInfo = file.Read(mapinfo, "GAME")
     else
         self.MapInfo = "No objectives found!"
     end
-    
+
     if not file.Exists("zm_info", "DATA") then
         file.CreateDir("zm_info")
     end
-    
+
     if file.Exists("zm_info/help_menu.html", "DATA") then
         self.HelpInfo = file.Read("zm_info/help_menu.html", "DATA")
     else
@@ -446,12 +634,17 @@ end
 
 function GM:OnReloaded()
     if team.NumPlayers(TEAM_ZOMBIEMASTER) > 0 then
-        timer.Simple(0.25, function() 
+        timer.Simple(0.25, function()
             self.Income_Time = 1
             self:SetRoundActive(true)
+            BroadcastLua([[
+                if IsValid(GAMEMODE.PlayerLobby) then
+                    GAMEMODE.PlayerLobby:Close()
+                end
+            ]])
         end)
     end
-    
+
     hook.Call("BuildZombieDataTable", self)
     hook.Call("SetupNetworkingCallbacks", self)
     hook.Call("SetupCustomItems", self)
@@ -460,9 +653,9 @@ end
 function GM:PlayerSpawnAsSpectator(pl)
     pl:StripWeapons()
     pl:SetClass("player_spectator")
-    pl:SetTeam(TEAM_SPECTATOR)
-    pl:SendLua("gamemode.Call('RemoveZMPanels')")
-    
+    pl:ChangeTeam(TEAM_SPECTATOR)
+    pl:SendLua("hook.Call('RemoveZMPanels', GAMEMODE)")
+
     player_manager.RunClass(pl, "Spawn")
 end
 
@@ -483,52 +676,51 @@ function GM:PlayerDeathSound()
 end
 
 function GM:PlayerInitialSpawn(pl)
-    pl:SetTeam(TEAM_UNASSIGNED)
-    
+    pl.FreshSpawn = true
+    pl:ChangeTeam(TEAM_SPECTATOR)
+    pl:AddEFlags(EFL_IN_SKYBOX)
+    pl:KillSilent()
+    pl:Spectate(OBS_MODE_ROAMING)
+    pl:CrosshairDisable()
+    pl:SetFlashlightBattery(100)
+    pl.AllowKeyPress = true
+    self:LoadVault(pl)
+
     if (self:GetRoundActive() and team.NumPlayers(TEAM_SURVIVOR) == 0 and team.NumPlayers(TEAM_ZOMBIEMASTER) >= 1) and not NotifiedRestart then
         PrintTranslatedMessage(HUD_PRINTTALK, "round_restarting")
         timer.Simple(4, function() hook.Call("EndRound", self) end)
         NotifiedRestart = true
     end
-    
+
     if pl:IsBot() then
         hook.Call("InitClient", self, pl)
     end
-    
+
     pl.NextPainSound = 0
-    
+
     if not zm_start_round and not self:GetRoundActive() then
         zm_start_round = true
     end
-        
+
     net.Start("zm_infostrings")
         net.WriteString(self.MapInfo)
         net.WriteString(self.HelpInfo)
     net.Send(pl)
-    
+
+    net.Start("zm_navloaded")
+        net.WriteBool(self.bReplaceZombiesWithNextBots)
+    net.Send(pl)
+
     if not GetConVar("zm_debug_nolobby"):GetBool() and not self:GetRoundActive() then
         net.Start("zm_updateclientreadytable")
             net.WriteBool(true)
-            net.WriteTable(playerReadyList)
+            net.WriteTable(PlayerReadyList)
         net.Send(pl)
     end
 end
 
-function GM:IncreaseResources(pZM)
-    if not IsValid(pZM) then return end
-    
-    local players = player.GetCount() - 1
-    local resources = pZM:GetZMPoints()
-    local increase = GetConVar("zm_maxresource_increase"):GetInt()
-    
-    increase = increase * math.Clamp(players, 1, 5)
-    
-    pZM:SetZMPoints(resources + increase)
-    pZM:SetZMPointIncome(increase)
-end
-
 function GM:PlayerNoClip(ply, desiredState)
-    return ply:IsAdmin() or not desiredState
+    return ply:IsAdmin() and ply:Team() ~= TEAM_ZOMBIEMASTER
 end
 
 function GM:OnNPCKilled(ent, attacker, inflictor)
@@ -565,17 +757,28 @@ function GM:PlayerSay(sender, text, teamChat)
         local roundtext = Either(roundsleft == 1, "round", "rounds")
         PrintMessage(HUD_PRINTTALK, "There is currently "..roundsleft.." "..roundtext.." left.")
     end
-    
+
     return BaseClass.PlayerSay(self, sender, text, teamChat)
 end
 
 function GM:OnPlayerClassChanged(pl, class)
 end
+function GM:OnPlayerChangedTeam() end -- disable message Bot01 joined Spectators
 
-function GM:OnPlayerChangedTeam(ply, oldTeam, newTeam)
+function GM:PlayerChangedTeam(ply, oldTeam, newTeam)
     if newTeam == TEAM_ZOMBIEMASTER then
+        self.pZombieMaster = ply
         SetGlobalEntity("zm_zombiemaster_player", ply)
         timer.Simple(0.1, function() ply:SendLua("GAMEMODE:CreateVGUI()") end)
+    elseif newTeam == TEAM_SURVIVOR then
+        ply:SetCustomGroupAndFlags(ZS_COLLISIONGROUP_HUMAN, ZS_COLLISIONFLAGS_HUMAN)
+    end
+
+    ply:Flashlight(false)
+    ply:SendLua("if MySelf.ClientSetFlashlight then MySelf:ClientSetFlashlight(false) end")
+
+    if oldTeam == TEAM_SURVIVOR then
+        self:ApplyZombieScaling()
     end
 end
 
@@ -651,67 +854,77 @@ function GM:CreateGibs(pos, headoffset)
     end
 end
 
-function GM:TeamVictorious(won, message)
+function GM:TeamVictorious(won, message, submit)
     if self:GetPreRoundEnd() then return end
-    
+
     self:SetPreRoundEnd(true)
-    
+
     local winscore = Either(won, HUMAN_WIN_SCORE, HUMAN_LOSS_SCORE)
     local winningteam = Either(won, TEAM_SURVIVOR, TEAM_ZOMBIEMASTER)
     for _, ply in pairs(team.GetPlayers(winningteam)) do
         ply:AddFrags(winscore)
     end
-    
+
     hook.Call("IncrementRoundCount", self)
-    
+
     local rounds = GetConVar("zm_roundlimit"):GetInt()
     if self:GetRoundsPlayed() > rounds then
         timer.Simple(3, function() hook.Call("LoadNextMap", self) end)
     else
         timer.Simple(4, function() hook.Call("EndRound", self) end)
     end
-    
-    for _, ply in pairs(player.GetAll()) do
+
+    for _, ply in ipairs(player.GetAllNoCopy()) do
         if translate.ClientGet(ply, message) ~= "@"..message.."@" then
             ply:PrintTranslatedMessage(HUD_PRINTTALK, message)
         else
             ply:PrintMessage(HUD_PRINTTALK, message)
         end
     end
-    
+
     hook.Call("FinishingRound", self, won, rounds)
 end
 
 function GM:EndRound()
+    if player.GetCount() == 0 and GetConVar("zm_debug_nozombiemaster"):GetBool() then return end
     if self:GetRoundsPlayed() > GetConVar("zm_roundlimit"):GetInt() or self:GetRoundEnd() then return end
-    
-    for _, pl in pairs(player.GetAll()) do
+
+    for _, pl in ipairs(player.GetAllNoCopy()) do
+        pl.m_TriggerCount = 0
+        pl.m_SpawnCount = 0
         pl:StripWeapons()
         pl:StripAmmo()
         pl:Spectate(OBS_MODE_ROAMING)
         pl:SetZMPoints(0)
-        
+        pl:Flashlight(false)
+
         hook.Call("PlayerSpawnAsSpectator", self, pl)
     end
-    
+
     BroadcastLua("hook.Call('RestartRound', GAMEMODE)")
-    
+
     table.Empty(self.groups)
     table.Empty(self.DeadPlayers)
     table.Empty(self.iZombieList)
-    
+
+    self.GameStartTime = nil
     self.currentmaxgroup = 0
     self.selectedgroup = 0
     self.Income_Time = 0
+    self.pZombieMaster = nil
     self:SetCurZombiePop(0)
     NotifiedRestart = false
-    
+
+    self:SetRoundActive(false)
     self:SetRoundEnd(true)
-    
+    self:SaveAllVaults()
+
     timer.Simple(1, function()
+        self.bZombieMasterSelected = false
+
         self:SetPreRoundEnd(false)
         self:SetRoundEnd(false)
-        
+
         hook.Call("SetupZombieMasterVolunteers", self)
         for _, ent in pairs(ents.FindByClass("info_loadout")) do
             ent:Distribute()
@@ -727,25 +940,31 @@ function GM:SetupPlayer(ply)
     ply:Freeze(false)
     ply:SendLua([[
         gui.EnableScreenClicker(false, true)
-        
         if IsValid(GAMEMODE.PreferredMenu) then
             GAMEMODE.PreferredMenu:Close()
         end
+        MySelf:ScreenFade(SCREENFADE.IN, Color( 255, 255, 255, 255 ), 1.25, 0)
+        MySelf:EmitSound("ambient/energy/whiteflash.wav", 75, math.random(105, 110))
     ]])
-    
-    if ply:GetInfoNum("zm_preference", 0) == 2 then return end
-    
-    ply:SetTeam(TEAM_SURVIVOR)
+
+    if ply:GetInfoNum("zm_preference", 0) == 2 or ply:Team() == TEAM_ZOMBIEMASTER then return end
+
+    if ply.FreshSpawn and self.MapInfo ~= "No objectives found!" then
+        self:ShowHelp(ply)
+    end
+    ply.FreshSpawn = false
+
+    ply:ChangeTeam(TEAM_SURVIVOR)
     ply:SetClass("player_survivor")
-    
+
     ply:UnSpectate()
     ply:Spawn()
-    
+
     ply:SprintDisable()
     if ply:KeyDown(IN_WALK) then
         ply:ConCommand("-walk")
     end
-        
+
     ply:ResetHull()
     ply:SetCanWalk(false)
     ply:SetCanZoom(false)
@@ -753,74 +972,91 @@ end
 
 function GM:InitClient(pl)
     if not pl:IsValid() then return end
-    
+
     if not self:GetRoundActive() then
         pl:Freeze(true)
     end
-    
+
     if self:GetReadyCount() == -1 and (player.GetCount() > 1 or GetConVar("zm_debug_nolobby"):GetBool()) then
         self:SetReadyCount(CurTime() + (GetConVar("zm_debug_nolobby"):GetBool() and 5 or GetConVar("zm_readytimerlength"):GetInt()))
     end
-    
+
     if pl:GetInfoNum("zm_nopreferredmenu", 0) <= 0 then
         pl:SendLua("GAMEMODE:MakePreferredMenu()")
     end
-    
+
     if self.RoundStarted and self.RoundStarted ~= 0 and self:GetRoundActive() then
-        if self.RoundStarted + GetConVar("zm_postroundstarttimer"):GetInt() >= CurTime() and not self.DeadPlayers[pl:SteamID()] then
+        if pl.FreshSpawn and self.RoundStarted + GetConVar("zm_postroundstarttimer"):GetInt() >= CurTime() and not self.DeadPlayers[pl:SteamID()] then
             hook.Call("SetupPlayer", self, pl)
-            
+
             local randply
             local maxs, mins
-            local randvect
-            local pos
+            local pos, plpos
+            local plang
             local allhumans = team.GetPlayers(TEAM_SURVIVOR)
             local maxcount = #allhumans
             local count = 0
             repeat
                 if count >= maxcount then break end
                 count = count + 1
-                
+
                 repeat
                     randply = allhumans[math.random(#allhumans)]
                 until IsValid(randply)
-                
-                maxs = randply:OBBMaxs()
-                mins = randply:OBBMins()
-                randvect = Vector(math.Rand(mins.x, maxs.x), math.Rand(mins.y, maxs.y), 0)
-                randvect.z = 0
-                maxs.z = 0
-                pos = randply:GetPos() + randvect + maxs
+
+                if GetConVar("zm_disableplayercollision"):GetBool() then
+                    pos = randply:GetPos()
+                else
+                    mins, maxs = randply:GetHull()
+
+                    plpos = randply:WorldSpaceCenter()
+                    plang = randply:GetAngles()
+
+                    for i=0, 3 do
+                        local tr = util.TraceHull( {
+                            start = plpos,
+                            endpos = plpos + (i == 0 and plang:Forward() or i == 1 and -plang:Forward() or i == 2 and plang:Right() or -plang:Right()),
+                            filter = randply,
+                            mins = bottom,
+                            maxs = top
+                        } )
+
+                        if tr.Fraction < 1 then continue end
+
+                        pos = tr.HitPos
+                        break
+                    end
+                end
             until util.IsInWorld(pos)
-            
-            if pos == nil then 
-                local spawnpoint = hook.Call("PlayerSelectSpawn", GAMEMODE, pl)
+
+            if pos == nil then
+                local spawnpoint = hook.Call("PlayerSelectSpawn", self, pl)
                 if IsValid(spawnpoint) then
                     pos = spawnpoint:GetPos()
                 end
             end
-            
+
             pl:SetPos(pos)
-            
-            local pZM = GAMEMODE:FindZM()
+
+            --[[local pZM = self:FindZM()
             if IsValid(pZM) then
-                pZM:SetZMPointIncome(pZM:GetZMPointIncome() + 5)
-            end
+                hook.Call("IncreaseResources", self, pZM, true)
+            end--]]
         end
     else
-        playerReadyList[pl] = pl:IsBot()
-        
+        PlayerReadyList[pl] = pl:IsBot()
+
         if not GetConVar("zm_debug_nolobby"):GetBool() then
             net.Start("zm_updateclientreadytable")
                 net.WriteBool(false)
                 net.WriteEntity(pl)
-                net.WriteBool(playerReadyList[pl])
+                net.WriteBool(PlayerReadyList[pl])
             net.Broadcast()
-            
+
             self:CheckPlayersReady()
         end
     end
-    
+
     hook.Call("InitPostClient", self, pl)
 end
 
@@ -830,120 +1066,55 @@ end
 function GM:CheckPlayersReady()
     if player.GetCount() > 1 then
         local bNotReady = false
-        for pl, b in pairs(playerReadyList) do
+        for pl, b in pairs(PlayerReadyList) do
             if not b then bNotReady = true break end
         end
-        
-        if not bNotReady then
-            GAMEMODE:SetReadyCount(CurTime() + 5)
-            GAMEMODE:SetGameStarting(true)
-        end
-    end
-end
 
-function GM:ConvertEntTo(prop, convertto)
-    if convertto == "" or convertto == nil then return end
-    if not IsValid(prop:GetPhysicsObject()) then return end
-    
-    local ent = ents.Create(convertto)
-    if IsValid(ent) then
-        ent:SetName(prop:GetName())
-        ent:SetPos(prop:GetPos())
-        ent:SetAngles(prop:GetAngles())
-        ent:SetModel(prop:GetModel())
-        ent:SetMaterial(prop:GetMaterial())
-        ent:SetSkin(prop:GetSkin() or 0)
-        ent:SetBodyGroups(prop:GetBodyGroups())
-        ent:SetCollisionGroup(prop:GetCollisionGroup())
-        ent:SetModelScale(prop:GetModelScale() or 1)
-        ent:SetParent(prop:GetParent())
-        ent:SetOwner(prop:GetOwner())
-        ent:SetSolid(prop:GetSolid())
-        ent:SetMoveType(prop:GetMoveType())
-        ent:SetRenderFX(prop:GetRenderFX())
-        ent:SetGravity(prop:GetGravity())
-        ent:SetMoveCollide(prop:GetMoveCollide())
-        ent:SetNoDraw(prop:GetNoDraw())
-        ent:SetNotSolid(prop:IsSolid())
-        ent:SetRenderMode(prop:GetRenderMode())
-        ent:SetSolidFlags(prop:GetSolidFlags())
-        ent:SetSpawnEffect(prop:GetSpawnEffect())
-        ent:SetCollisionBounds(prop:GetCollisionBounds())
-        ent:SetColor(prop:GetColor())
-        ent:SetCustomCollisionCheck(prop:GetCustomCollisionCheck())
-        ent:SetFriction(prop:GetFriction())
-        ent:SetGroundEntity(prop:GetGroundEntity())
-        ent:SetTransmitWithParent(prop:GetTransmitWithParent())
-        
-        for index, mat in pairs(prop:GetMaterials()) do
-            ent:SetSubMaterial(index - 1, mat)
-        end
-        
-        if prop:Health() > 0 then
-            ent:SetHealth(prop:Health())
-        end
-        
-        for key, value in pairs(prop:GetKeyValues()) do
-            ent:SetKeyValue(key, value)
-        end
-        
-        ent:Spawn()
-        ent:Activate()
-        
-        local phys = prop:GetPhysicsObject()
-        if IsValid(phys) then
-            local phys2 = ent:GetPhysicsObject()
-            if IsValid(phys2) then
-                phys2:SetMass(phys:GetMass())
-                phys2:SetMaterial(phys:GetMaterial())
-                
-                if phys:IsMotionEnabled() then
-                    phys2:Wake()
-                else
-                    phys2:EnableMotion(false)
-                end
+        if not bNotReady then
+            if (self:GetReadyCount() - CurTime()) > 5 then
+                self:SetReadyCount(CurTime() + 5)
             end
+            self:SetGameStarting(true)
         end
-        
-        if string.find(prop:GetClass(), "func_physbox") then
-            if not IsValid(ent:GetPhysicsObject()) then
-                ent:PhysicsInitBox(prop:OBBMins(), prop:OBBMaxs())
-            end
-        end
-        
-        ent:SetTable(prop:GetTable())
-        
-        prop:Remove()
     end
 end
 
 function GM:EntityTakeDamage(ent, dmginfo)
     local attacker, inflictor = dmginfo:GetAttacker(), dmginfo:GetInflictor()
     local damage = dmginfo:GetDamage()
-    
-    if attacker:IsNPC() then
+
+    if ent:IsPlayerHolding() then
+        dmginfo:SetDamageForce(vector_origin)
+    end
+
+    if (ent:GetInternalVariable("m_explodeDamage") or 0) > 0 or (ent:GetInternalVariable("m_explodeRadius") or 0) > 0 then
+        if attacker and attacker:IsPlayer() and ent:IsPlayerHolding() then
+            dmginfo:SetDamage(0)
+            dmginfo:ScaleDamage(0)
+            return true
+        end
+
+        if ent:IsOnFire() then
+            dmginfo:ScaleDamage(2.0)
+        end
+    end
+
+    if attacker:IsNPC() or attacker:IsNextBot() then
         self:CallZombieFunction(attacker, "OnDamagedEnt", ent, dmginfo)
-    elseif inflictor:IsNPC() then
+    elseif inflictor:IsNPC() or inflictor:IsNextBot() then
         self:CallZombieFunction(inflictor, "OnDamagedEnt", ent, dmginfo)
     end
 
-    if ent:IsPlayerHolding() and not (attacker:IsWorld() or inflictor:IsWorld()) then
-        dmginfo:SetDamage(0)
-        dmginfo:ScaleDamage(0)
-        dmginfo:SetDamageType(DMG_BULLET)
-        
-        return true
-    end
-    
-    if ent:IsNPC() then
+    if ent:IsNPC() or ent:IsNextBot() then
         if self:CallZombieFunction(ent, "OnTakeDamage", attacker, inflictor, dmginfo) then return true end
     end
-    
+
     if ent:IsPlayer() then
         if player_manager.RunClass(ent, "OnTakeDamage", attacker, dmginfo) then return true end
     end
-    
-    if attacker:IsNPC() and string.sub(ent:GetClass(), 1, 12) == "prop_physics" then
+
+    local is_prop = string.sub(ent:GetClass(), 1, 12) == "prop_physics"
+    if (attacker:IsNPC() or attacker:IsNextBot()) and is_prop then
         local phys = ent:GetPhysicsObject()
         if IsValid(phys) then
             if phys:IsMotionEnabled() then
@@ -951,7 +1122,7 @@ function GM:EntityTakeDamage(ent, dmginfo)
             end
         end
     end
-    
+
     -- We need to stop explosive chains team killing.
     if inflictor:IsValid() then
         local dmgtype = dmginfo:GetDamageType()
@@ -960,24 +1131,40 @@ function GM:EntityTakeDamage(ent, dmginfo)
                 if inflictor.LastExplosionTeam == ent:Team() and inflictor.LastExplosionAttacker ~= ent and inflictor.LastExplosionTime and CurTime() < inflictor.LastExplosionTime + 10 then -- Player damaged by physics object explosion / fire.
                     dmginfo:SetDamage(0)
                     dmginfo:ScaleDamage(0)
-                    return
+                    return true
                 end
-            elseif inflictor ~= ent and string.sub(ent:GetClass(), 1, 12) == "prop_physics" and string.sub(inflictor:GetClass(), 1, 12) == "prop_physics" then -- Physics object damaged by physics object explosion / fire.
+            elseif inflictor ~= ent and is_prop and string.sub(inflictor:GetClass(), 1, 12) == "prop_physics" then -- Physics object damaged by physics object explosion / fire.
                 ent.LastExplosionAttacker = inflictor.LastExplosionAttacker
                 ent.LastExplosionTeam = inflictor.LastExplosionTeam
                 ent.LastExplosionTime = CurTime()
+
+                ent:SetPhysicsAttacker(ent.LastExplosionAttacker)
             end
-        elseif inflictor:IsPlayer() and string.sub(ent:GetClass(), 1, 12) == "prop_physics" then -- Physics object damaged by player.
+        elseif inflictor:IsPlayer() and is_prop then -- Physics object damaged by player.
             ent.LastExplosionAttacker = inflictor
             ent.LastExplosionTeam = inflictor:Team()
             ent.LastExplosionTime = CurTime()
+
+            ent:SetPhysicsAttacker(inflictor)
         end
     end
-    
-    hook.Call("PostEntityTakeDamage", self, ent, dmginfo)
+
+	if ent:GetMaxHealth() > 1 and ent:Health() <= 0 and not ent:IsPlayer() and not ent:IsNPC() and not ent:IsNextBot() then
+        ent:Fire("break")
+        SafeRemoveEntityDelayed(ent, 0)
+    end
 end
 
-function GM:PostEntityTakeDamage(ent, dmginfo)
+function GM:PostEntityTakeDamage(ent, dmginfo, took)
+    local attacker, inflictor = dmginfo:GetAttacker(), dmginfo:GetInflictor()
+
+    if ent:IsNPC() or ent:IsNextBot() then
+        if self:CallZombieFunction(ent, "PostOnTakeDamage", attacker, inflictor, dmginfo, took) then return true end
+    end
+
+    if ent:IsPlayer() then
+        if player_manager.RunClass(ent, "PostOnTakeDamage", attacker, dmginfo, took) then return true end
+    end
 end
 
 function GM:SetRoundStartTime(time)
@@ -994,68 +1181,127 @@ function GM:Tick()
     end
 end
 
+function GM:CanInactivityPunish(pPlayer)
+    if pPlayer:IsBot() then
+        return false
+    end
+
+    if pPlayer:IsZM() and GetConVar("zm_sv_antiafk_replacezm"):GetBool() then
+        return true
+    end
+
+    local punish = GetConVar("zm_sv_antiafk_punish"):GetInt()
+    if punish == AFK_PUNISH_SPECTATE then
+        if pPlayer:IsSpectator() then
+            return false
+        end
+    elseif punish == AFK_PUNISH_NOTHING then
+        return false
+    end
+
+    return true
+end
+
+function GM:PunishInactivity(pPlayer)
+    if team.NumPlayers(TEAM_SURVIVOR) <= 1 and team.NumPlayers(TEAM_SPECTATOR) == 0 then
+        self:SetRoundActive(false)
+        hook.Call("TeamVictorious", self, true, "zombiemaster_afk", true)
+        return
+    end
+
+    if GetConVar("zm_sv_antiafk_replacezm"):GetBool() and pPlayer:IsZM() and not self:GetRoundEnd() and team.NumPlayers(TEAM_ZOMBIEMASTER) <= 1 then
+        hook.Call("ReplaceZM", self, pPlayer)
+    end
+
+    local punish = GetConVar("zm_sv_antiafk_punish"):GetInt()
+    if punish == AFK_PUNISH_SPECTATE then
+        if not pPlayer:IsSpectator() then
+            pPlayer:KillSilent()
+            hook.Call("PlayerSpawnAsSpectator", self, pPlayer)
+        end
+    elseif punish == AFK_PUNISH_KICK then
+        pPlayer:Kick("AFK")
+    end
+end
+
+function GM:ReplaceZM(pZM)
+    local pChoice = NULL
+
+    local vFirstChoice = {}
+    local vOther = {}
+
+    for _, pPlayer in ipairs(player.GetAllNoCopy()) do
+        if pPlayer == pZM or pPlayer:IsZM() then continue end
+        if pPlayer:GetInfoNum("zm_preference", 0) == 2 then continue end
+
+        if pPlayer:IsSpectator() or not pPlayer:Alive() then
+            table.insert(vFirstChoice, pPlayer)
+        end
+
+        table.insert(vOther, pPlayer)
+    end
+
+    if #vFirstChoice > 0 then
+        pChoice = vFirstChoice[math.random(#vFirstChoice)]
+    elseif #vOther > 0 then
+        pChoice = vOther[math.random(#vFirstChoice)]
+    end
+
+    if pChoice:IsValid() then
+        hook.Call("SetPlayerToZombieMaster", self, pChoice, true)
+    end
+
+    pZM:KillSilent()
+    hook.Call("PlayerSpawnAsSpectator", self, pZM)
+
+    return pChoice:IsValid()
+end
+
 local NextTick = 0
 function GM:Think()
     local time = CurTime()
 
-    local players = player.GetAll()
+    local players = player.GetAllNoCopy()
     for i= 1, #players do
         local ply = players[i]
         player_manager.RunClass(ply, "Think")
     end
-    
-    for ent, pl in pairs(self.PlayerHeldObjects) do
-        if not IsValid(ent) then continue end
-        
-        if not ent:IsPlayerHolding() then 
-            local colgroup = Either(ent._OldCG == COLLISION_GROUP_WEAPON, COLLISION_GROUP_NONE, ent._OldCG) or COLLISION_GROUP_NONE
-            ent:SetCollisionGroup(colgroup)
-            
-            pl.HeldObject = nil
-            self.PlayerHeldObjects[ent] = nil
-        end
-    end
-    
+
     if NextTick <= time then
         NextTick = time + 1
-        
+
         if not GetConVar("zm_disableplayercollision"):GetBool() then
             local playercount = player.GetCount()
             if playercount > 16 then
                 for i= 1, #players do
                     local ply = players[i]
-                    if ply:GetCustomCollisionCheck() then continue end
-                    
+                    if ply:GetNoCollideWithTeammates() or not ply:IsSurvivor() then continue end
+
+                    ply:SetNoCollideWithTeammates(true)
                     ply:SetCustomCollisionCheck(true)
+                    ply:SetAvoidPlayers(false)
+                    ply:CollisionRulesChanged()
                 end
-                
+
                 if not self.SetNoCollidePlayers then self.SetNoCollidePlayers = true end
             elseif self.SetNoCollidePlayers then
                 for i= 1, #players do
                     local ply = players[i]
-                    if not ply:GetCustomCollisionCheck() then continue end
-                    
+                    if not ply:GetNoCollideWithTeammates() or not ply:IsSurvivor() then continue end
+
+                    ply:SetNoCollideWithTeammates(false)
                     ply:SetCustomCollisionCheck(false)
+                    ply:SetAvoidPlayers(true)
                 end
-                
-                if self.SetNoCollidePlayers then self.SetNoCollidePlayers = false end    
+
+                if self.SetNoCollidePlayers then self.SetNoCollidePlayers = false end
             end
         end
-        
-        if not GetConVar("zm_debug_nozombiemaster"):GetBool() and self:GetRoundActive() and not self:GetRoundEnd() and #team.GetPlayers(TEAM_ZOMBIEMASTER) == 0 then
-            hook.Call("SetupZombieMasterVolunteers", self, true)
-        end
-        
-        if zm_start_round then
-            if self:GetReadyCount() ~= -1 and CurTime() >= self:GetReadyCount() and self:GetRoundStart() and not zm_selection_started then
-                self:SetZMSelection(true)
-                zm_selection_started = true
-                zm_start_round = false
-                
-                hook.Call("SetupZombieMasterVolunteers", self)
-                for _, ent in pairs(ents.FindByClass("info_loadout")) do
-                    ent:Distribute()
-                end
+
+        if self:GetReadyCount() ~= -1 and CurTime() >= self:GetReadyCount() and not self:GetRoundActive() then
+            hook.Call("SetupZombieMasterVolunteers", self)
+            for _, ent in pairs(ents.FindByClass("info_loadout")) do
+                ent:Distribute()
             end
         end
     end
@@ -1074,84 +1320,104 @@ function GM:ShowSpare1(pl)
 end
 
 function GM:PlayerDisconnected(ply)
-    timer.Simple(0.1, function()
-        if (player.GetCount() == 1 or player.GetCount() == 0) or self:GetRoundActive() then
-            if team.NumPlayers(TEAM_ZOMBIEMASTER) <= 0 then
-                hook.Call("TeamVictorious", self, true, "zombiemaster_left")
-            elseif team.NumPlayers(TEAM_SURVIVOR) <= 0 then
-                hook.Call("TeamVictorious", self, false, "all_humans_left")
-            end
+    if self:GetRoundActive() then
+        if ply:IsZM() and #team.GetPlayers(TEAM_ZOMBIEMASTER) <= 0 then
+            self:SetRoundActive(false)
+            hook.Call("TeamVictorious", self, true, "zombiemaster_left", true)
+        elseif ply:IsSurvivor() and team.NumPlayers(TEAM_SURVIVOR) <= 0 then
+            self:SetRoundActive(false)
+            hook.Call("TeamVictorious", self, false, "all_humans_left", true)
         end
-    end)
-    
+    end
+    self:SaveVault(ply)
+
     self.DeadPlayers[ply:SteamID()] = true
 end
 
 function GM:IsSpawnpointSuitable(pl, spawnpointent, bMakeSuitable)
     local Pos = spawnpointent:GetPos()
     local Ents = ents.FindInBox(Pos + Vector(-16, -16, 0), Pos + Vector(16, 16, 64))
-    
+
     if pl:Team() == TEAM_SPECTATOR then return true end
-    
+
     local Blockers = 0
     for k, v in pairs( Ents ) do
         if IsValid(v) and v ~= pl and v:GetClass() == "player" and v:Alive() then
             Blockers = Blockers + 1
         end
     end
-    
+
     if bMakeSuitable then return true end
     if Blockers > 0 then return false end
-    
+
     return true
 end
 
 function GM:SetupZombieMasterVolunteers(bSkipToSelection)
+    if (self:GetRoundsPlayed() > GetConVar("zm_roundlimit"):GetInt()) or self:GetRoundEnd() then return end
+
     if team.NumPlayers(TEAM_ZOMBIEMASTER) == 0 then
-        local pl = hook.Call("GetZombieMasterVolunteer", self)
-        if IsValid(pl) then
-            hook.Call("SetPlayerToZombieMaster", self, pl)
-            
+        if not GetConVar("zm_debug_nozombiemaster"):GetBool() then
+
+			local extra_zm_count = math.floor( #player.GetAll() / math.max( GetConVar("zm_multiple_zms_per_players"):GetInt(), 1 ) )
+
+			if self.ForceSingleZM then
+				extra_zm_count = 0
+			end
+			
+			print( "Extra Zombie Masters needed: "..extra_zm_count )
+
+			hook.Call("SetPlayerToZombieMaster", self, hook.Call("GetZombieMasterVolunteer", self))
+
+			for i=1, extra_zm_count do
+				hook.Call("SetPlayerToZombieMaster", self, hook.Call("GetZombieMasterVolunteer", self, true), true)
+			end
+
             timer.Simple(1, function()
-                if IsValid(pl) and pl:Team() ~= TEAM_ZOMBIEMASTER then
-                    hook.Call("SetPlayerToZombieMaster", self, pl)
+                if self:GetRoundActive() then
+                    hook.Call("SetupZombieMasterVolunteers", self, true)
                 end
             end)
+        else
+            self:SetRoundActive(true)
+            BroadcastLua([[
+                if IsValid(GAMEMODE.PlayerLobby) then
+                    GAMEMODE.PlayerLobby:Close()
+                end
+            ]])
         end
     end
-    
+
     if not bSkipToSelection then
-        self:SetZMSelection(false)
-        self:SetRoundStart(false)
         self.RoundStarted = CurTime()
-        
-        game.CleanUpMap()
-        
-        for _, ply in pairs(player.GetAll()) do
-            if ply:Team() == TEAM_ZOMBIEMASTER then continue end
+
+        game.CleanUpMap(true, self.CleanupFilterServer)
+        BroadcastLua("game.CleanUpMap(false, GAMEMODE.CleanupFilterClient)")
+
+        for _, ply in ipairs(team.GetPlayers(TEAM_SPECTATOR)) do
             hook.Call("SetupPlayer", self, ply)
         end
     end
 end
 
-function GM:SetPlayerToZombieMaster(pl)
-    if team.NumPlayers(TEAM_ZOMBIEMASTER) >= 1 then return end
-    
-    if not IsValid(pl) then 
-        hook.Call("SetupZombieMasterVolunteers", self, true) 
+function GM:SetPlayerToZombieMaster(pl, bForce)
+    if team.NumPlayers(TEAM_ZOMBIEMASTER) >= 1 and not bForce then return end
+
+    if not IsValid(pl) then
+        --hook.Call("SetupZombieMasterVolunteers", self, true) FIX ME: infinite loop
         return
     end
-    
+
     pl:KillSilent()
     pl:SetFrags(0)
     pl:SetDeaths(0)
     pl:Freeze(false)
-    pl:SetTeam(TEAM_ZOMBIEMASTER)
+    pl:ChangeTeam(TEAM_ZOMBIEMASTER)
     pl:SetClass("player_zombiemaster")
     pl:Spawn()
-    
-    for _, pPlayer in pairs(player.GetAll()) do
-        if pPlayer ~= pl then 
+
+    for _, pPlayer in ipairs(player.GetAllNoCopy()) do
+        if pPlayer ~= pl then
             self.ZombieMasterPriorities[pPlayer] = (self.ZombieMasterPriorities[pPlayer] or 0) + 10
         end
     end
@@ -1160,98 +1426,91 @@ function GM:SetPlayerToZombieMaster(pl)
 
     PrintTranslatedMessage(HUD_PRINTTALK, "x_has_become_the_zombiemaster", pl:Name())
 
-    pl:SetZMPoints(425)
-    hook.Call("IncreaseResources", self, pl)
+    pl:SetZMPoints(GetConVar("zm_initial_resources"):GetInt())
+    --hook.Call("IncreaseResources", self, pl)
 
     self.Income_Time = CurTime() + GetConVar("zm_incometime"):GetInt()
-    
+
     self:SetRoundActive(true)
+    BroadcastLua([[
+        if IsValid(GAMEMODE.PlayerLobby) then
+            GAMEMODE.PlayerLobby:Close()
+        end
+    ]])
+
+    if not self.GameStartTime then
+        self.GameStartTime = CurTime()
+    end
 end
 
-function GM:GetZombieMasterVolunteer()
-    if GetConVar("zm_debug_nozombiemaster"):GetBool() then
-        self:SetRoundActive(true)
-        return nil 
-    end
-    
-    if team.NumPlayers(TEAM_ZOMBIEMASTER) >= 1 then return end
-    
+function GM:GetZombieMasterVolunteer( bForce )
+    if IsValid(self:FindZM()) and not bForce then return self:FindZM() end
+
     local iHighest = -1
-    for _, pl in pairs(player.GetAll()) do
+    for _, pl in ipairs(player.GetAllNoCopy()) do
         if pl:GetInfoNum("zm_preference", 0) == 2 then continue end
-        
+
         local iPriority = self.ZombieMasterPriorities[pl]
         if iPriority and iPriority > iHighest and pl:GetInfoNum("zm_preference", 0) == 1 then
             iHighest = iPriority
         end
     end
-    
+
     local ZMList = {}
-    for _, pl in pairs(player.GetAll()) do
+    for _, pl in ipairs(player.GetAllNoCopy()) do
         if pl:GetInfoNum("zm_preference", 0) == 2 then continue end
-        
+
         local iPriority = self.ZombieMasterPriorities[pl]
         if iPriority and iPriority == iHighest and pl:GetInfoNum("zm_preference", 0) == 1 then
             ZMList[#ZMList + 1] = pl
         end
     end
-    
+
     local pl = nil
     if #ZMList > 0 then
         pl = ZMList[math.random(#ZMList)]
+        if not (pl and pl:IsValid()) then
+            local players = player.GetAllNoCopy()
+            pl = players[math.random(#players)]
+        end
     else
-        local players = player.GetAll()
+        local players = player.GetAllNoCopy()
         pl = players[math.random(#players)]
     end
-    
+
+    if not IsValid(pl) then
+        pl = player.GetAll()[math.random(player.GetCount())]
+    end
+
     return pl
 end
 
 function GM:AllowPlayerPickup(pl, ent)
-    if player_manager.RunClass(pl, "AllowPickup", ent) then    
-        pl.HeldObject = ent
-        ent._OldCG = Either(ent:GetCollisionGroup() == COLLISION_GROUP_WEAPON, COLLISION_GROUP_NONE, ent:GetCollisionGroup())
-        ent:SetCollisionGroup(COLLISION_GROUP_WEAPON)
-        pl:PickupObject(ent)
-        
-        self.PlayerHeldObjects[ent] = pl
-        
+    if ent:GetClass() == "item_zm_ammo" then
+        if hook.Call("PlayerCanPickupItem", self, pl, ent) then
+            ent:Touch(pl)
+        else
+            pl:PickupObject(ent)
+        end
+
         return false
     end
-    
+
+    if ent:IsPlayerHolding() and pl == ent.bHeldBy then
+        pl:DropObject()
+        return false
+    end
+
+    if player_manager.RunClass(pl, "AllowPickup", ent) then
+        pl:PickupObject(ent)
+        return false
+    end
+
     return false
 end
 
 function GM:PlayerCanHearPlayersVoice(listener, talker)
     return true, false
-end
-
-local function IsBadEnt(ent)
-    return ent:IsPlayer() or ent:IsWeapon() or ent:GetClass() == "item_zm_ammo"
-end
-function GM:FindUseEntity(ply, defaultEnt)
-    if IsValid(defaultEnt) then
-        if IsBadEnt(defaultEnt) then
-            local tr = util.TraceHull({
-                start = ply:EyePos(),
-                endpos = ply:EyePos() + ply:EyeAngles():Forward() * 64,
-                mins = Vector(-8, -8, -8),
-                maxs = Vector(8, 8, 8),    
-                mask = bit.bor(MASK_SHOT, CONTENTS_GRATE),
-                filter = function(ent)
-                    return (not IsBadEnt(ent))
-                end
-            })
-            local ent = tr.Entity
-            if IsValid(ent) then
-                return ent
-            else
-                return defaultEnt
-            end
-        end
-    end
-    
-    return defaultEnt
 end
 
 function GM:PlayerUse(pl, ent)
@@ -1269,11 +1528,12 @@ function GM:PlayerUse(pl, ent)
 end
 
 function GM:PlayerSwitchFlashlight(pl, newstate)
-    return pl:IsSurvivor()
-end
+	if pl:IsSurvivor() and pl:Alive() and (pl.LastFlashLightToggle or 0) < RealTime() then
+		pl.LastFlashLightToggle = RealTime() + 0.25
+		pl:ToggleFlashlight()
+	end
 
-function GM:SetZMSelection(value)
-    SetGlobalBool("zm_zmselection_start", value)
+	return false
 end
 
 function GM:SetCurZombiePop(amount)
@@ -1283,10 +1543,6 @@ end
 
 function GM:SetRoundActive(active)
     SetGlobalBool("zm_round_active", active)
-end
-
-function GM:SetRoundStart(active)
-    SetGlobalBool("zm_round_start", active)
 end
 
 function GM:SetPreRoundEnd(active)
@@ -1320,9 +1576,9 @@ end
 function GM:SpawnZombie(pZM, entname, origin, angles, cost, bHidden)
     local tab = self:GetZombieData(entname)
     if not tab then return NULL end
-    
+
     local popcost = tab.PopCost
-    if (self:GetCurZombiePop() + popcost) > self:GetMaxZombiePop() then
+    if IsValid(pZM) and (self:GetCurZombiePop() + popcost) > self:GetMaxZombiePop() then
         pZM:PrintTranslatedMessage(HUD_PRINTCENTER, "population_limit_reached")
         return NULL
     end
@@ -1330,960 +1586,124 @@ function GM:SpawnZombie(pZM, entname, origin, angles, cost, bHidden)
     local pZombie = ents.Create(entname)
 
     if IsValid(pZombie) then
-        if tab.SpawnFlags then
-            pZombie:SetKeyValue("spawnflags", tostring(tab.SpawnFlags))
+        local PosInWorld, pos = pZombie:FloorPoint(origin + Vector(0, 0, 0.1), MASK_NPCSOLID, 0, -2048)
+
+        if not PosInWorld then
+            print( string.format("NPC %s stuck in wall--level design error at (%.2f %.2f %.2f)\n", pZombie:GetClass(), pZombie:GetPos().x, pZombie:GetPos().y, pZombie:GetPos().z) )
         end
-        
-        pZombie:SetKeyValue("crabcount", "0")
-        
-        pZombie:SetPos(origin)
+
+        pZombie:SetPos(pos)
         pZombie:SetOwner(pZM)
         pZombie:SetCollisionGroup(COLLISION_GROUP_NPC)
-        
-        local tr = util.TraceHull({
-            start = origin,
-            endpos = origin + -angles:Up() * 10000,
-            maxs = Vector(13, 13, 72),
-            mins = Vector(-13, -13, 0),
-            mask = MASK_NPCSOLID
-        })
-        if tr.Hit and tr.HitWorld and not tr.HitSky then
-            pZombie:SetPos(tr.HitPos + Vector(0, 0, 12))
-        end
-        
+
         angles.x = 0.0
         angles.z = 0.0
         pZombie:SetAngles(angles)
-        
-        pZombie:SetNW2Bool("bIsEngineNPC", not pZombie:IsScripted())
-        
+
+        if pZombie.SetEngineNPC then
+            pZombie:SetEngineNPC(not pZombie:IsScripted())
+        end
+
         pZombie.SpawnedFromNode = true
         pZombie:Spawn()
         pZombie:Activate()
         pZombie:AddEFlags(EFL_IN_SKYBOX)
-        
+
         self:CallZombieFunction(pZombie, "SetupModel")
         self:CallZombieFunction(pZombie, "OnSpawned")
-        
-        pZM:TakeZMPoints(cost)
+
+        if pZM and pZM:IsValid() then
+            pZM:TakeZMPoints(cost)
+        end
+
         self:AddCurZombiePop(popcost)
 
+        --annoying bug
+        if tab.Class == "npc_headcrab" then
+            timer.Simple(0.2, function()
+                if pZombie and IsValid(pZombie) then
+                    pZombie:SetPos(pos)
+                end
+            end)
+        end
         return pZombie
     end
-    
+
     return NULL
 end
 
--- Antistuck code by Heox and Soldner42
-local NextCheck = 0
-function GM:CheckIfPlayerStuck(pl)
-    if self.SetNoCollidePlayers or GetConVar("zm_disableplayercollision"):GetBool() then return end
-    
-    if NextCheck < CurTime() and pl:IsSurvivor() then
-        NextCheck = CurTime() + 0.1
-        
-        local Offset = Vector(5, 5, 5)
-        local Stuck = false
-        
-        if pl.Stuck == nil then
-            pl.Stuck = false
-        end
-        
-        if pl.Stuck then
-            Offset = Vector(2, 2, 2) //This is because we don't want the script to enable when the players touch, only when they are inside eachother. So, we make the box a little smaller when they aren't stuck.
-        end
+function GM:ServerTravel( nextURL )
+	if self.PendingURL then
+		if not nextURL then -- Abort mapchange.
+			timer.Remove("ServerTravelURL")
+			self.PendingURL = nil
+			print("Pending mapchange aborted!")
 
-        for _,ent in pairs(ents.FindInBox(pl:GetPos() + pl:OBBMins() + Offset, pl:GetPos() + pl:OBBMaxs() - Offset)) do
-            if IsValid(ent) and ent ~= pl and ent:IsPlayer() and ent:Alive() and ent:IsSurvivor() then
-            
-                pl:SetCollisionGroup(COLLISION_GROUP_WEAPON)
-                pl:SetVelocity(Vector(-10, -10, 0) * 20)
-                
-                ent:SetVelocity(Vector(10, 10, 0) * 20)
-                
-                Stuck = true
-            end
-        end
-       
-        if not Stuck then
-            pl.Stuck = false
-            pl:SetCollisionGroup(COLLISION_GROUP_PLAYER)
-        end
-    end
+			net.Start("zm_servertravel")
+				net.WriteBool(false)
+			net.Broadcast()
+		end
+		return
+	elseif not nextURL then
+		return
+	end
+
+	net.Start("zm_servertravel")
+		net.WriteBool(true)
+		net.WriteString(nextURL)
+	net.Broadcast()
+
+	self.PendingURL = nextURL
+	print("Pending mapchange to "..nextURL)
+	timer.Create("ServerTravelURL", 6, 1, function()
+		RunConsoleCommand( "changelevel", nextURL )
+		timer.Simple(10, function() RunConsoleCommand( "changelevel", game.GetMap()) end ) -- Just incase the server hangs itself.
+	end)
+end
+
+function GM:PropBreak(attacker, prop)
+    SafeRemoveEntityDelayed(prop, 0)
+end
+
+function GM:SetupNetworkingCallbacks()
+end
+
+function GM:NPCTraceAttack(npc, dmginfo, dir, trace)
+	npc.HitGroupWindow = npc.HitGroupWindow or 0
+
+	if npc.HitGroupWindow < CurTime() then
+		npc.HitGroupWindow = CurTime() + 0.01
+		npc.LastHitGroup = trace.HitGroup
+		npc.LastHitBox = trace.HitBox
+	else
+		if trace.HitGroup ~= 0 then
+			npc.LastHitGroup = trace.HitGroup
+			npc.LastHitBox = trace.HitBox
+		end
+	end
+
+    npc:SetNWInt("LastHitBox", npc.LastHitBox)
 end
 
 net.Receive("zm_playeready", function(len, pl)
     local bReady = net.ReadBool()
-    playerReadyList[pl] = bReady
-    
+    PlayerReadyList[pl] = bReady
+
     net.Start("zm_updateclientreadytable")
         net.WriteBool(false)
         net.WriteEntity(pl)
         net.WriteBool(bReady)
     net.Broadcast()
-    
+
     GAMEMODE:CheckPlayersReady()
 end)
 
-function GM:AddResources()
-    resource.AddFile( "materials/background01.vtf" )
-    resource.AddFile( "materials/bboard/zm_bboard_batt.vmt" )
-    resource.AddFile( "materials/bboard/zm_bboard_batt.vtf" )
-    resource.AddFile( "materials/bboard/zm_bboard_btyre.vmt" )
-    resource.AddFile( "materials/bboard/zm_bboard_btyre.vtf" )
-    resource.AddFile( "materials/bboard/zm_bboard_fcan1.vmt" )
-    resource.AddFile( "materials/bboard/zm_bboard_fcan1.vtf" )
-    resource.AddFile( "materials/bboard/zm_bboard_fcan2.vmt" )
-    resource.AddFile( "materials/bboard/zm_bboard_fcan2.vtf" )
-    resource.AddFile( "materials/bboard/zm_bboard_ftyre.vmt" )
-    resource.AddFile( "materials/bboard/zm_bboard_ftyre.vtf" )
-    resource.AddFile( "materials/bboard/zm_bboard_items.vmt" )
-    resource.AddFile( "materials/bboard/zm_bboard_items.vtf" )
-    resource.AddFile( "materials/concrete/concretefloor010b_nobump.vmt" )
-    resource.AddFile( "materials/concrete/concretefloor013c_nobump.vmt" )
-    resource.AddFile( "materials/concrete/concretefloor028c_nobump.vmt" )
-    resource.AddFile( "materials/concrete/concretefloor037b_nobump.vmt" )
-    resource.AddFile( "materials/concrete/concretefloor039a_nobump.vmt" )
-    resource.AddFile( "materials/concrete/concretefloor039b_nobump.vmt" )
-    resource.AddFile( "materials/concrete/concretewall004b_nobump.vmt" )
-    resource.AddFile( "materials/concrete/concretewall004c_nobump.vmt" )
-    resource.AddFile( "materials/containers/metalcrate001a.vmt" )
-    resource.AddFile( "materials/containers/metalcrate001a.vtf" )
-    resource.AddFile( "materials/containers/metalcrate001b.vmt" )
-    resource.AddFile( "materials/containers/metalcrate001b.vtf" )
-    resource.AddFile( "materials/containers/metalcrate001c.vmt" )
-    resource.AddFile( "materials/containers/metalcrate001c.vtf" )
-    resource.AddFile( "materials/containers/metalcrate001d.vmt" )
-    resource.AddFile( "materials/containers/metalcrate001d.vtf" )
-    resource.AddFile( "materials/containers/metalcrate002a.vmt" )
-    resource.AddFile( "materials/containers/metalcrate002a.vtf" )
-    resource.AddFile( "materials/containers/metalcrate002b.vmt" )
-    resource.AddFile( "materials/containers/metalcrate002b.vtf" )
-    resource.AddFile( "materials/containers/metalcrate002c.vmt" )
-    resource.AddFile( "materials/containers/metalcrate002c.vtf" )
-    resource.AddFile( "materials/containers/metalcrate002d.vmt" )
-    resource.AddFile( "materials/containers/metalcrate002d.vtf" )
-    resource.AddFile( "materials/containers/metalcrate004d.vmt" )
-    resource.AddFile( "materials/containers/metalcrate004d.vtf" )
-    resource.AddFile( "materials/containers/metalcrate005a.vmt" )
-    resource.AddFile( "materials/containers/metalcrate005a.vtf" )
-    resource.AddFile( "materials/containers/metalcrate006a.vmt" )
-    resource.AddFile( "materials/containers/metalcrate006a.vtf" )
-    resource.AddFile( "materials/containers/metalcrate007a.vmt" )
-    resource.AddFile( "materials/containers/metalcrate007a.vtf" )
-    resource.AddFile( "materials/containers/metalcrate008a.vmt" )
-    resource.AddFile( "materials/containers/metalcrate008a.vtf" )
-    resource.AddFile( "materials/containers/metalcrate009a.vmt" )
-    resource.AddFile( "materials/containers/metalcrate009a.vtf" )
-    resource.AddFile( "materials/containers/metalcrate010a.vmt" )
-    resource.AddFile( "materials/containers/metalcrate010a.vtf" )
-    resource.AddFile( "materials/containers/picrate_512_clean.vmt" )
-    resource.AddFile( "materials/containers/picrate_512_clean.vtf" )
-    resource.AddFile( "materials/containers/picrate_512_het.vmt" )
-    resource.AddFile( "materials/containers/picrate_512_het.vtf" )
-    resource.AddFile( "materials/containers/picrate_long.vtf" )
-    resource.AddFile( "materials/containers/picrate_long_clean.vmt" )
-    resource.AddFile( "materials/containers/picrate_long_clean.vtf" )
-    resource.AddFile( "materials/containers/picrate_long_mil.vmt" )
-    resource.AddFile( "materials/containers/picrate_long_mil.vtf" )
-    resource.AddFile( "materials/containers/warehouse_crate_1.vmt" )
-    resource.AddFile( "materials/containers/warehouse_crate_1.vtf" )
-    resource.AddFile( "materials/decals/decalgraffiti003a.vtf" )
-    resource.AddFile( "materials/decals/decalgraffiti011a.vtf" )
-    resource.AddFile( "materials/decals/decalgraffiti012a.vtf" )
-    resource.AddFile( "materials/decals/decalgraffiti024a.vtf" )
-    resource.AddFile( "materials/decals/decalgraffiti037a.vtf" )
-    resource.AddFile( "materials/decals/decalgraffiti056a.vtf" )
-    resource.AddFile( "materials/decals/decalgraffiti059a.vtf" )
-    resource.AddFile( "materials/decals/decal_posterbreen.vtf" )
-    resource.AddFile( "materials/decals/decal_posters002a.vtf" )
-    resource.AddFile( "materials/decals/decal_posters003a.vtf" )
-    resource.AddFile( "materials/decals/decal_posters005a.vtf" )
-    resource.AddFile( "materials/decals/decal_posters006a.vtf" )
-    resource.AddFile( "materials/decals/holes64_03.vtf" )
-    resource.AddFile( "materials/decals/infwalldetail17.vtf" )
-    resource.AddFile( "materials/decals/offpaintingb.vmt" )
-    resource.AddFile( "materials/decals/omh_1.vmt" )
-    resource.AddFile( "materials/decals/omh_1.vtf" )
-    resource.AddFile( "materials/decals/omh_2.vmt" )
-    resource.AddFile( "materials/decals/omh_2.vtf" )
-    resource.AddFile( "materials/effects/strider_bulge_dudv.vtf" )
-    resource.AddFile( "materials/effects/strider_bulge_dudv_dx60.vmt" )
-    resource.AddFile( "materials/effects/strider_bulge_dx60.vmt" )
-    resource.AddFile( "materials/effects/strider_bulge_normal.vtf" )
-    resource.AddFile( "materials/effects/zm_arrows.vmt" )
-    resource.AddFile( "materials/effects/zm_arrows.vtf" )
-    resource.AddFile( "materials/effects/zm_healthring.vmt" )
-    resource.AddFile( "materials/effects/zm_healthring.vtf" )
-    resource.AddFile( "materials/effects/zm_nightvis.vmt" )
-    resource.AddFile( "materials/effects/zm_nightvis.vtf" )
-    resource.AddFile( "materials/effects/zm_refract.vmt" )
-    resource.AddFile( "materials/effects/zm_ring.vmt" )
-    resource.AddFile( "materials/effects/zm_ring.vtf" )
-    resource.AddFile( "materials/effects/zombie_select.vmt" )
-    resource.AddFile( "materials/effects/zombie_selection.vtf" )
-    resource.AddFile( "materials/effects/zombie_selection_alt.vtf" )
-    resource.AddFile( "materials/lawyer/cratewall_1.vmt" )
-    resource.AddFile( "materials/lawyer/cratewall_1.vtf" )
-    resource.AddFile( "materials/lawyer/cratewall_1_normal.vtf" )
-    resource.AddFile( "materials/lawyer/cratewall_2.vmt" )
-    resource.AddFile( "materials/lawyer/cratewall_2.vtf" )
-    resource.AddFile( "materials/lawyer/cratewall_2_normal.vtf" )
-    resource.AddFile( "materials/lawyer/cratewall_3.vmt" )
-    resource.AddFile( "materials/lawyer/cratewall_3.vtf" )
-    resource.AddFile( "materials/lawyer/cratewall_3_normal.vtf" )
-    resource.AddFile( "materials/lawyer/cratewall_4.vmt" )
-    resource.AddFile( "materials/lawyer/cratewall_4.vtf" )
-    resource.AddFile( "materials/lawyer/cratewall_4_normal.vtf" )
-    resource.AddFile( "materials/lawyer/crate_lawyer.vmt" )
-    resource.AddFile( "materials/lawyer/crate_lawyer.vtf" )
-    resource.AddFile( "materials/lawyer/crate_lawyer_normal.vtf" )
-    resource.AddFile( "materials/lawyer/crate_lawyer_top.vmt" )
-    resource.AddFile( "materials/lawyer/crate_lawyer_top.vtf" )
-    resource.AddFile( "materials/lawyer/crate_lawyer_top_normal.vtf" )
-    resource.AddFile( "materials/lawyer/serverroomcarpet.vmt" )
-    resource.AddFile( "materials/lawyer/serverroomcarpet.vtf" )
-    resource.AddFile( "materials/lawyer/serverroomcarpet_normal.vtf" )
-    resource.AddFile( "materials/lawyer.vtf" )
-    resource.AddFile( "materials/lostcoast/models/props_monastery/interior_dome_wall_window.vmt" )
-    resource.AddFile( "materials/lostcoast/models/props_monastery/interior_dome_wall_window.vtf" )
-    resource.AddFile( "materials/lostcoast/models/props_monastery/interior_dome_wall_window_dx60.vmt" )
-    resource.AddFile( "materials/lostcoast/models/props_monastery/interior_dome_wall_window_normal.vtf" )
-    resource.AddFile( "materials/lostcoast/models/props_monastery/monastery_stain_window001a.vmt" )
-    resource.AddFile( "materials/lostcoast/models/props_monastery/monastery_stain_window001a.vtf" )
-    resource.AddFile( "materials/lostcoast/models/props_monastery/monastery_stain_window001a_dx60.vmt" )
-    resource.AddFile( "materials/lostcoast/models/props_monastery/monastery_stain_window001a_normal.vtf" )
-    resource.AddFile( "materials/metal/citadel_metalwall077a_nospec.vmt" )
-    resource.AddFile( "materials/metal/citadel_metalwall077a_nospec.vtf" )
-    resource.AddFile( "materials/metal/metalcrate001pi.vmt" )
-    resource.AddFile( "materials/metal/metalcrate001pi.vtf" )
-    resource.AddFile( "materials/metal/metalfilecabinet002a.vmt" )
-    resource.AddFile( "materials/metal/metalfilecabinet002a.vtf" )
-    resource.AddFile( "materials/metal/metalpipe003a.vmt" )
-    resource.AddFile( "materials/metal/metalwall001a_nobump.vmt" )
-    resource.AddFile( "materials/metal/metalwall001b_nobump.vmt" )
-    resource.AddFile( "materials/metal/metalwall001d_nobump.vmt" )
-    resource.AddFile( "materials/metal/metalwall001f_nobump.vmt" )
-    resource.AddFile( "materials/metal/metalwall014a_nobump.vmt" )
-    resource.AddFile( "materials/metal/metalwall018a_nobump.vmt" )
-    resource.AddFile( "materials/metal/metalwall018b_nobump.vmt" )
-    resource.AddFile( "materials/metal/metalwall018e_nobump.vmt" )
-    resource.AddFile( "materials/metal/metalwall018f_nobump.vmt" )
-    resource.AddFile( "materials/metal/metalwall021a_nobump.vmt" )
-    resource.AddFile( "materials/metal/metalwall021b_nobump.vmt" )
-    resource.AddFile( "materials/metal/metalwall021e_nobump.vmt" )
-    resource.AddFile( "materials/metal/metalwall021f_nobump.vmt" )
-    resource.AddFile( "materials/metal/metalwall026a_nobump.vmt" )
-    resource.AddFile( "materials/metal/metalwall058a.vmt" )
-    resource.AddFile( "materials/metal/metalwall058a.vtf" )
-    resource.AddFile( "materials/models/blue.vmt" )
-    resource.AddFile( "materials/models/blue.vtf" )
-    resource.AddFile( "materials/models/glow.vmt" )
-    resource.AddFile( "materials/models/glow.vtf" )
-    resource.AddFile( "materials/models/glow_orange.vtf" )
-    resource.AddFile( "materials/models/gold.vmt" )
-    resource.AddFile( "materials/models/gold.vtf" )
-    resource.AddFile( "materials/models/humans/female/group01/fem_survivor1.vmt" )
-    resource.AddFile( "materials/models/humans/female/group01/fem_survivor2.vmt" )
-    resource.AddFile( "materials/models/humans/female/group01/fem_survivor3.vmt" )
-    resource.AddFile( "materials/models/humans/female/group01/fem_survivor4.vmt" )
-    resource.AddFile( "materials/models/humans/female/group01/fem_survivor6.vmt" )
-    resource.AddFile( "materials/models/humans/female/group01/fem_survivor7.vmt" )
-    resource.AddFile( "materials/models/humans/female/group02/fem_survivor1.vmt" )
-    resource.AddFile( "materials/models/humans/female/group02/fem_survivor1.vtf" )
-    resource.AddFile( "materials/models/humans/female/group02/fem_survivor2.vmt" )
-    resource.AddFile( "materials/models/humans/female/group02/fem_survivor2.vtf" )
-    resource.AddFile( "materials/models/humans/female/group02/fem_survivor3.vmt" )
-    resource.AddFile( "materials/models/humans/female/group02/fem_survivor3.vtf" )
-    resource.AddFile( "materials/models/humans/female/group02/fem_survivor4.vmt" )
-    resource.AddFile( "materials/models/humans/female/group02/fem_survivor4.vtf" )
-    resource.AddFile( "materials/models/humans/female/group02/fem_survivor6.vmt" )
-    resource.AddFile( "materials/models/humans/female/group02/fem_survivor6.vtf" )
-    resource.AddFile( "materials/models/humans/female/group02/fem_survivor7.vmt" )
-    resource.AddFile( "materials/models/humans/female/group02/fem_survivor7.vtf" )
-    resource.AddFile( "materials/models/humans/male/group01/MaleSurvivor1.vmt" )
-    resource.AddFile( "materials/models/humans/male/group01/MaleSurvivor2.vmt" )
-    resource.AddFile( "materials/models/humans/male/group01/MaleSurvivor3.vmt" )
-    resource.AddFile( "materials/models/humans/male/group01/MaleSurvivor4.vmt" )
-    resource.AddFile( "materials/models/humans/male/group01/MaleSurvivor5.vmt" )
-    resource.AddFile( "materials/models/humans/male/group01/MaleSurvivor6.vmt" )
-    resource.AddFile( "materials/models/humans/male/group01/MaleSurvivor7.vmt" )
-    resource.AddFile( "materials/models/humans/male/group01/MaleSurvivor8.vmt" )
-    resource.AddFile( "materials/models/humans/male/group01/MaleSurvivor9.vmt" )
-    resource.AddFile( "materials/models/humans/male/group02/citizen_sheet_pi.vmt" )
-    resource.AddFile( "materials/models/humans/male/group02/citizen_sheet_pi.vtf" )
-    resource.AddFile( "materials/models/humans/male/group02/citizen_sheet_pi_normal.vtf" )
-    resource.AddFile( "materials/models/humans/male/group02/MaleSurvivor1.vmt" )
-    resource.AddFile( "materials/models/humans/male/group02/MaleSurvivor1.vtf" )
-    resource.AddFile( "materials/models/humans/male/group02/MaleSurvivor2.vmt" )
-    resource.AddFile( "materials/models/humans/male/group02/MaleSurvivor2.vtf" )
-    resource.AddFile( "materials/models/humans/male/group02/MaleSurvivor3.vmt" )
-    resource.AddFile( "materials/models/humans/male/group02/MaleSurvivor3.vtf" )
-    resource.AddFile( "materials/models/humans/male/group02/MaleSurvivor4.vmt" )
-    resource.AddFile( "materials/models/humans/male/group02/MaleSurvivor4.vtf" )
-    resource.AddFile( "materials/models/humans/male/group02/MaleSurvivor5.vmt" )
-    resource.AddFile( "materials/models/humans/male/group02/MaleSurvivor5.vtf" )
-    resource.AddFile( "materials/models/humans/male/group02/MaleSurvivor6.vmt" )
-    resource.AddFile( "materials/models/humans/male/group02/MaleSurvivor6.vtf" )
-    resource.AddFile( "materials/models/humans/male/group02/MaleSurvivor7.vmt" )
-    resource.AddFile( "materials/models/humans/male/group02/MaleSurvivor7.vtf" )
-    resource.AddFile( "materials/models/humans/male/group02/MaleSurvivor8.vmt" )
-    resource.AddFile( "materials/models/humans/male/group02/MaleSurvivor8.vtf" )
-    resource.AddFile( "materials/models/humans/male/group02/MaleSurvivor9.vmt" )
-    resource.AddFile( "materials/models/humans/male/group02/MaleSurvivor9.vtf" )
-    resource.AddFile( "materials/models/humans/male/group02/pi_facemap.vmt" )
-    resource.AddFile( "materials/models/humans/male/group02/pi_facemap.vtf" )
-    resource.AddFile( "materials/models/humans/male/group02/steveo_facemap.vmt" )
-    resource.AddFile( "materials/models/humans/male/group02/steveo_facemap.vtf" )
-    resource.AddFile( "materials/models/items/revolverammo.vmt" )
-    resource.AddFile( "materials/models/items/revolverammo.vtf" )
-    resource.AddFile( "materials/models/largedoor_right.vmt" )
-    resource.AddFile( "materials/models/largedoor_right.vtf" )
-    resource.AddFile( "materials/models/null.vmt" )
-    resource.AddFile( "materials/models/null.vtf" )
-    resource.AddFile( "materials/models/orange.vmt" )
-    resource.AddFile( "materials/models/props/bell.vmt" )
-    resource.AddFile( "materials/models/props/bell.vtf" )
-    resource.AddFile( "materials/models/props/deathball_sheet.vmt" )
-    resource.AddFile( "materials/models/props/deathball_sheet.vtf" )
-    resource.AddFile( "materials/models/props/metalceiling005a.vmt" )
-    resource.AddFile( "materials/models/props/metalceiling005a.vtf" )
-    resource.AddFile( "materials/models/props/metalceiling005a_normal.vtf" )
-    resource.AddFile( "materials/models/props/pew.vmt" )
-    resource.AddFile( "materials/models/props/pew.vtf" )
-    resource.AddFile( "materials/models/props_c17/frame002a_skin2.vtf" )
-    resource.AddFile( "materials/models/props_c17/frame002a_skin3.vtf" )
-    resource.AddFile( "materials/models/props_c17/frame002a_skin4.vtf" )
-    resource.AddFile( "materials/models/props_c17/frame002a_skin5.vtf" )
-    resource.AddFile( "materials/models/props_c17/frame002a_skin6.vtf" )
-    resource.AddFile( "materials/models/props_c17/oil_drum001_splode.vmt" )
-    resource.AddFile( "materials/models/props_c17/oil_drum001_splode.vtf" )
-    resource.AddFile( "materials/models/props_interiors/sodamachine01a.vmt" )
-    resource.AddFile( "materials/models/props_interiors/sodamachine01a.vtf" )
-    resource.AddFile( "materials/models/props_junk/garbage003a_01.vtf" )
-    resource.AddFile( "materials/models/props_junk/popcan01a.vtf" )
-    resource.AddFile( "materials/models/props_junk/popcan02a.vtf" )
-    resource.AddFile( "materials/models/props_junk/popcan03a.vtf" )
-    resource.AddFile( "materials/models/props_lab/bewaredog.vtf" )
-    resource.AddFile( "materials/models/props_lab/clipboard_sheet.vtf" )
-    resource.AddFile( "materials/models/props_lab/computer_disp.vtf" )
-    resource.AddFile( "materials/models/props_lab/corkboard001_sheet.vtf" )
-    resource.AddFile( "materials/models/props_lab/corkboard002_sheet.vtf" )
-    resource.AddFile( "materials/models/props_lab/photo_group001a.vtf" )
-    resource.AddFile( "materials/models/props_lab/photo_group002a.vtf" )
-    resource.AddFile( "materials/models/props_lab/security_screen.vtf" )
-    resource.AddFile( "materials/models/props_lab/security_screens.vtf" )
-    resource.AddFile( "materials/models/props_lab/workspace_sheet.vtf" )
-    resource.AddFile( "materials/models/props_vehicles/apc001.vmt" )
-    resource.AddFile( "materials/models/props_vehicles/apc001.vtf" )
-    resource.AddFile( "materials/models/props_vehicles/apc_tire001.vmt" )
-    resource.AddFile( "materials/models/props_vehicles/apc_tire001.vtf" )
-    resource.AddFile( "materials/models/red.vmt" )
-    resource.AddFile( "materials/models/red.vtf" )
-    resource.AddFile( "materials/models/red2.vmt" )
-    resource.AddFile( "materials/models/ship1/largedoor_left.vmt" )
-    resource.AddFile( "materials/models/ship1/largedoor_left.vtf" )
-    resource.AddFile( "materials/models/ship1/largedoor_right.vmt" )
-    resource.AddFile( "materials/models/ship1/largedoor_right.vtf" )
-    resource.AddFile( "materials/models/shotgun/casing01.vmt" )
-    resource.AddFile( "materials/models/shotgun/casing01.vtf" )
-    resource.AddFile( "materials/models/shotgun/shotgun_zm_diffuse.vmt" )
-    resource.AddFile( "materials/models/shotgun/shotgun_zm_diffuse.vtf" )
-    resource.AddFile( "materials/models/shotgun/shotgun_zm_exp.vtf" )
-    resource.AddFile( "materials/models/shotgun/shotgun_zm_normals.vtf" )
-    resource.AddFile( "materials/models/shotgun/shotgun_zm_normals_env.vtf" )
-    resource.AddFile( "materials/models/shotgun/v_hand_sheet.vmt" )
-    resource.AddFile( "materials/models/shotgun/v_hand_sheet.vtf" )
-    resource.AddFile( "materials/models/shotgun/v_hand_sheet_normal.vtf" )
-    resource.AddFile( "materials/models/silver.vmt" )
-    resource.AddFile( "materials/models/silver.vtf" )
-    resource.AddFile( "materials/models/weapons/flashlight_zm/flashlight3rd_diffuse.vmt" )
-    resource.AddFile( "materials/models/weapons/flashlight_zm/flashlight3rd_diffuse.vtf" )
-    resource.AddFile( "materials/models/weapons/flashlight_zm/flashlight_diffuse.vmt" )
-    resource.AddFile( "materials/models/weapons/flashlight_zm/flashlight_diffuse.vtf" )
-    resource.AddFile( "materials/models/weapons/flashlight_zm/flashlight_normal.vtf" )
-    resource.AddFile( "materials/models/weapons/hands_zm/v_hand_sheet.vmt" )
-    resource.AddFile( "materials/models/weapons/hands_zm/v_hand_sheet_zm.vmt" )
-    resource.AddFile( "materials/models/weapons/hands_zm/v_hand_sheet_zm.vtf" )
-    resource.AddFile( "materials/models/weapons/hands_zm/v_hand_sheet_zm_normal.vtf" )
-    resource.AddFile( "materials/models/weapons/molotov_zm/fire.vmt" )
-    resource.AddFile( "materials/models/weapons/molotov_zm/fireoff.vmt" )
-    resource.AddFile( "materials/models/weapons/molotov_zm/fireoff.vtf" )
-    resource.AddFile( "materials/models/weapons/molotov_zm/molotovfull_diffuse.vmt" )
-    resource.AddFile( "materials/models/weapons/molotov_zm/molotovfull_diffuse.vtf" )
-    resource.AddFile( "materials/models/weapons/molotov_zm/molotovfull_normal.vtf" )
-    resource.AddFile( "materials/models/weapons/molotov_zm/molotov_3rddiffuse.vmt" )
-    resource.AddFile( "materials/models/weapons/molotov_zm/molotov_3rddiffuse.vtf" )
-    resource.AddFile( "materials/models/weapons/molotov_zm/molotov_3rdnormalsmap.vtf" )
-    resource.AddFile( "materials/models/weapons/pistol_zm/pistol3rd_diffuse.vmt" )
-    resource.AddFile( "materials/models/weapons/pistol_zm/pistol3rd_diffuse.vtf" )
-    resource.AddFile( "materials/models/weapons/pistol_zm/pistol3rd_normal.vtf" )
-    resource.AddFile( "materials/models/weapons/pistol_zm/pistol_diffuse.vmt" )
-    resource.AddFile( "materials/models/weapons/pistol_zm/pistol_diffuse.vtf" )
-    resource.AddFile( "materials/models/weapons/pistol_zm/pistol_normal.vtf" )
-    resource.AddFile( "materials/models/weapons/rifle_zm/rifle_zm_3rd.vmt" )
-    resource.AddFile( "materials/models/weapons/rifle_zm/rifle_zm_3rd.vtf" )
-    resource.AddFile( "materials/models/weapons/rifle_zm/rifle_zm_3rd_specular_mask.vtf" )
-    resource.AddFile( "materials/models/weapons/rifle_zm/rifle_zm_cartridge.vmt" )
-    resource.AddFile( "materials/models/weapons/rifle_zm/rifle_zm_cartridge.vtf" )
-    resource.AddFile( "materials/models/weapons/rifle_zm/rifle_zm_diffuse.vmt" )
-    resource.AddFile( "materials/models/weapons/rifle_zm/rifle_zm_diffuse.vtf" )
-    resource.AddFile( "materials/models/weapons/rifle_zm/rifle_zm_normal.vtf" )
-    resource.AddFile( "materials/models/weapons/shotgun_zm/shotgun4.vtf" )
-    resource.AddFile( "materials/models/weapons/shotgun_zm/shotgun4diffuse.vmt" )
-    resource.AddFile( "materials/models/weapons/shotgun_zm/shotgun4diffuse.vtf" )
-    resource.AddFile( "materials/models/weapons/sledgehammer_zm/sledgehammer.vmt" )
-    resource.AddFile( "materials/models/weapons/sledgehammer_zm/sledgehammer_diffuse.vtf" )
-    resource.AddFile( "materials/models/weapons/sledgehammer_zm/sledgehammer_normal.vtf" )
-    resource.AddFile( "materials/models/weapons/sledgehammer_zm/sledge_sheet.vmt" )
-    resource.AddFile( "materials/models/weapons/sledgehammer_zm/sledge_sheet.vtf" )
-    resource.AddFile( "materials/models/weapons/sledgehammer_zm/sledge_sheet_nrml.vtf" )
-    resource.AddFile( "materials/models/weapons/v_mac_zm/mac10_sheet.vmt" )
-    resource.AddFile( "materials/models/weapons/v_mac_zm/mac10_sheet.vtf" )
-    resource.AddFile( "materials/models/weapons/v_mac_zm/mac10_sheet_spec.vtf" )
-    resource.AddFile( "materials/models/weapons/v_revolver_zm/v_revolver_sheet.vmt" )
-    resource.AddFile( "materials/models/weapons/v_revolver_zm/v_revolver_sheet.vtf" )
-    resource.AddFile( "materials/models/weapons/v_revolver_zm/v_revolver_sheet_nrml.vtf" )
-    resource.AddFile( "materials/models/weapons/v_shotgun/remington_sheet.vmt" )
-    resource.AddFile( "materials/models/weapons/v_shotgun/remington_sheet.vtf" )
-    resource.AddFile( "materials/models/weapons/v_shotgun/remington_sheet_spec.vtf" )
-    resource.AddFile( "materials/models/weapons/v_slam/new lense.vmt" )
-    resource.AddFile( "materials/models/weapons/v_slam/new lense.vtf" )
-    resource.AddFile( "materials/models/weapons/v_slam/new light1.vmt" )
-    resource.AddFile( "materials/models/weapons/v_slam/new light1.vtf" )
-    resource.AddFile( "materials/models/weapons/v_slam/new light2.vmt" )
-    resource.AddFile( "materials/models/weapons/v_slam/new light2.vtf" )
-    resource.AddFile( "materials/models/weapons/v_slam/new slam.vmt" )
-    resource.AddFile( "materials/models/weapons/v_slam/new slam.vtf" )
-    resource.AddFile( "materials/models/weapons/v_slam/retexture trigger.vmt" )
-    resource.AddFile( "materials/models/weapons/v_slam/retexture trigger.vtf" )
-    resource.AddFile( "materials/models/weapons/v_slam/v_slam.vmt" )
-    resource.AddFile( "materials/models/weapons/v_slam/v_slam.vtf" )
-    resource.AddFile( "materials/models/weapons/v_slam/v_slam_normal.vtf" )
-    resource.AddFile( "materials/models/weapons/v_smg/mac10_sheet.vmt" )
-    resource.AddFile( "materials/models/weapons/v_smg/mac10_sheet.vtf" )
-    resource.AddFile( "materials/models/weapons/v_smg/mac10_spec.vtf" )
-    resource.AddFile( "materials/models/weapons/v_stunstick/v_stunstick_diffuse.vmt" )
-    resource.AddFile( "materials/models/weapons/v_stunstick/v_stunstick_diffuse.vtf" )
-    resource.AddFile( "materials/models/weapons/v_stunstick/v_stunstick_normal.vtf" )
-    resource.AddFile( "materials/models/weapons/w_357/w_357.vmt" )
-    resource.AddFile( "materials/models/weapons/w_357/w_357.vtf" )
-    resource.AddFile( "materials/models/weapons/w_357/w_357_spec.vtf" )
-    resource.AddFile( "materials/models/weapons/w_shotgun_zm/w_shotgun_zm.vmt" )
-    resource.AddFile( "materials/models/weapons/w_shotgun_zm/w_shotgun_zm.vtf" )
-    resource.AddFile( "materials/models/weapons/zm_pistol/pist_fiveseven.vmt" )
-    resource.AddFile( "materials/models/weapons/zm_pistol/pist_fiveseven.vtf" )
-    resource.AddFile( "materials/models/weapons/zm_pistol/pist_fiveseven_ref.vtf" )
-    resource.AddFile( "materials/models/Zombie/zombie_classic/art_facemap.vtf" )
-    resource.AddFile( "materials/models/Zombie/zombie_classic/mike_facemap.vtf" )
-    resource.AddFile( "materials/models/Zombie/zombie_classic/test_facemap.vtf" )
-    resource.AddFile( "materials/models/Zombie/zombie_classic_humantest/eyeball_l.vtf" )
-    resource.AddFile( "materials/models/Zombie/zombie_classic_humantest/pupil_l.vtf" )
-    resource.AddFile( "materials/models/Zombie_Classic/art_facemap.vmt" )
-    resource.AddFile( "materials/models/Zombie_Classic/art_facemap.vtf" )
-    resource.AddFile( "materials/models/Zombie_Classic/BlckUnz_sheet.vmt" )
-    resource.AddFile( "materials/models/Zombie_Classic/BlckUnz_sheet.vtf" )
-    resource.AddFile( "materials/models/Zombie_Classic/BlckUnz_sheet1.vmt" )
-    resource.AddFile( "materials/models/Zombie_Classic/BlckZip_sheet.vtf" )
-    resource.AddFile( "materials/models/Zombie_Classic/BlckZip_sheet1.vmt" )
-    resource.AddFile( "materials/models/Zombie_Classic/BlueZip_sheet.vtf" )
-    resource.AddFile( "materials/models/Zombie_Classic/BlueZip_sheet1.vmt" )
-    resource.AddFile( "materials/models/Zombie_Classic/citizen_sheet.vmt" )
-    resource.AddFile( "materials/models/Zombie_Classic/citizen_sheet.vtf" )
-    resource.AddFile( "materials/models/Zombie_Classic/citizen_sheet2.vmt" )
-    resource.AddFile( "materials/models/Zombie_Classic/citizen_sheet2.vtf" )
-    resource.AddFile( "materials/models/Zombie_Classic/citizen_sheet3.vmt" )
-    resource.AddFile( "materials/models/Zombie_Classic/citizen_sheet3.vtf" )
-    resource.AddFile( "materials/models/Zombie_Classic/corpse1.vmt" )
-    resource.AddFile( "materials/models/Zombie_Classic/corpse1.vtf" )
-    resource.AddFile( "materials/models/Zombie_Classic/dark_eyeball_l.vmt" )
-    resource.AddFile( "materials/models/Zombie_Classic/dark_eyeball_r.vmt" )
-    resource.AddFile( "materials/models/Zombie_Classic/erdim_cylmap.vmt" )
-    resource.AddFile( "materials/models/Zombie_Classic/erdim_cylmap.vtf" )
-    resource.AddFile( "materials/models/Zombie_Classic/eric_facemap.vmt" )
-    resource.AddFile( "materials/models/Zombie_Classic/eric_facemap.vtf" )
-    resource.AddFile( "materials/models/Zombie_Classic/eyeball_l.vmt" )
-    resource.AddFile( "materials/models/Zombie_Classic/eyeball_l.vtf" )
-    resource.AddFile( "materials/models/Zombie_Classic/eyeball_r.vmt" )
-    resource.AddFile( "materials/models/Zombie_Classic/eyeball_r.vtf" )
-    resource.AddFile( "materials/models/Zombie_Classic/FlanBlu_sheet.vmt" )
-    resource.AddFile( "materials/models/Zombie_Classic/FlanBlu_sheet.vtf" )
-    resource.AddFile( "materials/models/Zombie_Classic/FlanBlu_sheet1.vmt" )
-    resource.AddFile( "materials/models/Zombie_Classic/FlanOrn_sheet.vtf" )
-    resource.AddFile( "materials/models/Zombie_Classic/FlanOrn_sheet1.vmt" )
-    resource.AddFile( "materials/models/Zombie_Classic/Jackets_sheet.vmt" )
-    resource.AddFile( "materials/models/Zombie_Classic/Jackets_sheet.vtf" )
-    resource.AddFile( "materials/models/Zombie_Classic/Jackets_sheet1.vmt" )
-    resource.AddFile( "materials/models/Zombie_Classic/joe_facemap.vmt" )
-    resource.AddFile( "materials/models/Zombie_Classic/joe_facemap.vtf" )
-    resource.AddFile( "materials/models/Zombie_Classic/KurtBlu_sheet.vmt" )
-    resource.AddFile( "materials/models/Zombie_Classic/KurtBlu_sheet.vtf" )
-    resource.AddFile( "materials/models/Zombie_Classic/KurtBlu_sheet1.vmt" )
-    resource.AddFile( "materials/models/Zombie_Classic/KurtGrn_sheet.vmt" )
-    resource.AddFile( "materials/models/Zombie_Classic/KurtGrn_sheet.vtf" )
-    resource.AddFile( "materials/models/Zombie_Classic/KurtGrn_sheet1.vmt" )
-    resource.AddFile( "materials/models/Zombie_Classic/mike_facemap.vmt" )
-    resource.AddFile( "materials/models/Zombie_Classic/mike_facemap.vtf" )
-    resource.AddFile( "materials/models/Zombie_Classic/Militry_sheet.vmt" )
-    resource.AddFile( "materials/models/Zombie_Classic/Militry_sheet.vtf" )
-    resource.AddFile( "materials/models/Zombie_Classic/Militry_sheet1.vmt" )
-    resource.AddFile( "materials/models/Zombie_Classic/mouth.vmt" )
-    resource.AddFile( "materials/models/Zombie_Classic/mouth.vtf" )
-    resource.AddFile( "materials/models/Zombie_Classic/OffcGrn_sheet.vmt" )
-    resource.AddFile( "materials/models/Zombie_Classic/OffcGrn_sheet.vtf" )
-    resource.AddFile( "materials/models/Zombie_Classic/OffcGrn_sheet1.vmt" )
-    resource.AddFile( "materials/models/Zombie_Classic/OffcTan_sheet.vmt" )
-    resource.AddFile( "materials/models/Zombie_Classic/OffcTan_sheet.vtf" )
-    resource.AddFile( "materials/models/Zombie_Classic/OffcTan_sheet1.vmt" )
-    resource.AddFile( "materials/models/Zombie_Classic/OffcWht_sheet.vtf" )
-    resource.AddFile( "materials/models/Zombie_Classic/OffcWht_sheet1.vmt" )
-    resource.AddFile( "materials/models/Zombie_Classic/OldChst_sheet.vtf" )
-    resource.AddFile( "materials/models/Zombie_Classic/OldChst_sheet1.vmt" )
-    resource.AddFile( "materials/models/Zombie_Classic/pupil_l.vtf" )
-    resource.AddFile( "materials/models/Zombie_Classic/pupil_r.vtf" )
-    resource.AddFile( "materials/models/Zombie_Classic/sandro_facemap.vmt" )
-    resource.AddFile( "materials/models/Zombie_Classic/sandro_facemap.vtf" )
-    resource.AddFile( "materials/models/Zombie_Classic/Sweater_sheet.vmt" )
-    resource.AddFile( "materials/models/Zombie_Classic/Sweater_sheet.vtf" )
-    resource.AddFile( "materials/models/Zombie_Classic/Sweater_sheet1.vmt" )
-    resource.AddFile( "materials/models/Zombie_Classic/ted_facemap.vmt" )
-    resource.AddFile( "materials/models/Zombie_Classic/ted_facemap.vtf" )
-    resource.AddFile( "materials/models/Zombie_Classic/vance_facemap.vmt" )
-    resource.AddFile( "materials/models/Zombie_Classic/vance_facemap.vtf" )
-    resource.AddFile( "materials/models/Zombie_Classic/van_facemap.vmt" )
-    resource.AddFile( "materials/models/Zombie_Classic/van_facemap.vtf" )
-    resource.AddFile( "materials/models/Zombie_Fast/corpse1.vmt" )
-    resource.AddFile( "materials/models/Zombie_Fast/corpse1.vtf" )
-    resource.AddFile( "materials/models/Zombie_Fast/corpse2.vmt" )
-    resource.AddFile( "materials/models/Zombie_Fast/corpse2.vtf" )
-    resource.AddFile( "materials/models/Zombie_Fast/corpse3.vmt" )
-    resource.AddFile( "materials/models/Zombie_Fast/corpse3.vtf" )
-    resource.AddFile( "materials/models/Zombie_Fast/corpse4.vmt" )
-    resource.AddFile( "materials/models/Zombie_Fast/corpse4.vtf" )
-    resource.AddFile( "materials/models/Zombie_Poison/PoisonZombie_sheet.vmt" )
-    resource.AddFile( "materials/models/Zombie_Poison/PoisonZombie_sheet.vtf" )
-    resource.AddFile( "materials/models/Zombie_Poison/PoisonZombie_sheet2.vmt" )
-    resource.AddFile( "materials/models/Zombie_Poison/PoisonZombie_sheet2.vtf" )
-    resource.AddFile( "materials/models/Zombie_Poison/PoisonZombie_sheet3.vmt" )
-    resource.AddFile( "materials/models/Zombie_Poison/PoisonZombie_sheet3.vtf" )
-    resource.AddFile( "materials/models/Zombie_Poison/PoisonZombie_sheet4.vmt" )
-    resource.AddFile( "materials/models/Zombie_Poison/PoisonZombie_sheet4.vtf" )
-    resource.AddFile( "materials/models/Zombie_Poison/PoisonZombie_sheet_normal2.vtf" )
-    resource.AddFile( "materials/nature/blenddirtmud003a_nobump.vmt" )
-    resource.AddFile( "materials/nature/rockwall006a_nobump.vmt" )
-    resource.AddFile( "materials/plaster/plasterwall034a_nobump.vmt" )
-    resource.AddFile( "materials/plaster/plasterwall034b_nobump.vmt" )
-    resource.AddFile( "materials/plaster/plasterwall034d_nobump.vmt" )
-    resource.AddFile( "materials/plaster/plasterwall034f_nobump.vmt" )
-    resource.AddFile( "materials/postprocess/alpha.vtf" )
-    resource.AddFile( "materials/postprocess/blend.vmt" )
-    resource.AddFile( "materials/postprocess/blurx.vmt" )
-    resource.AddFile( "materials/postprocess/blury.vmt" )
-    resource.AddFile( "materials/postprocess/nightvision.vmt" )
-    resource.AddFile( "materials/props/bell.vmt" )
-    resource.AddFile( "materials/props/bell.vtf" )
-    resource.AddFile( "materials/props/deathball_sheet.vmt" )
-    resource.AddFile( "materials/props/deathball_sheet.vtf" )
-    resource.AddFile( "materials/props/metalceiling005a.vmt" )
-    resource.AddFile( "materials/props/metalceiling005a.vtf" )
-    resource.AddFile( "materials/props/metalceiling005a_normal.vtf" )
-    resource.AddFile( "materials/props/metalfilecabinet002a.vmt" )
-    resource.AddFile( "materials/props/metalfilecabinet002a.vtf" )
-    resource.AddFile( "materials/props/metalladder001.vmt" )
-    resource.AddFile( "materials/props/metalladder001.vtf" )
-    resource.AddFile( "materials/props/paperposter001a.vtf" )
-    resource.AddFile( "materials/props/paperposter001b.vtf" )
-    resource.AddFile( "materials/props/paperposter002a.vtf" )
-    resource.AddFile( "materials/props/paperposter002b.vtf" )
-    resource.AddFile( "materials/props/paperposter003a.vtf" )
-    resource.AddFile( "materials/props/paperposter003b.vtf" )
-    resource.AddFile( "materials/props/paperposter005a.vtf" )
-    resource.AddFile( "materials/sign/redsign.vmt" )
-    resource.AddFile( "materials/sign/redsign.vtf" )
-    resource.AddFile( "materials/sign/whitesign.vmt" )
-    resource.AddFile( "materials/sign/whitesign.vtf" )
-    resource.AddFile( "materials/sprites/fire_greyscale.vtf" )
-    resource.AddFile( "materials/sprites/fire_vm.vmt" )
-    resource.AddFile( "materials/sprites/fire_vm_grey.vmt" )
-    resource.AddFile( "materials/sprites/flamefromabove.vmt" )
-    resource.AddFile( "materials/sprites/flamefromabove.vtf" )
-    resource.AddFile( "materials/sprites/glow.vmt" )
-    resource.AddFile( "materials/sprites/glow.vtf" )
-    resource.AddFile( "materials/sprites/glow04_noz.vmt" )
-    resource.AddFile( "materials/sprites/orangecore1.vmt" )
-    resource.AddFile( "materials/sprites/orangecore2.vmt" )
-    resource.AddFile( "materials/sprites/orangeflare1.vmt" )
-    resource.AddFile( "materials/sprites/orangelight1.vmt" )
-    resource.AddFile( "materials/sprites/orangelight1_noz.vmt" )
-    resource.AddFile( "materials/sprites/orangetest.vmt" )
-    resource.AddFile( "materials/temp/5446d717.vtf" )
-    resource.AddFile( "materials/temp/7e52e0ac.vtf" )
-    resource.AddFile( "materials/temp/ada7c148.vtf" )
-    resource.AddFile( "materials/temp/e4e75983.vtf" )
-    resource.AddFile( "materials/tile/tilefloor019a_nobump.vmt" )
-    resource.AddFile( "materials/truckpic/truckpic (13).vmt" )
-    resource.AddFile( "materials/truckpic/truckpic (14).vtf" )
-    resource.AddFile( "materials/truckpic/truckpic.vmt" )
-    resource.AddFile( "materials/truckpic/truckpic.vtf" )
-    resource.AddFile( "materials/vgui/tt_icon_light.png" )
-    resource.AddFile( "materials/vgui/gfx/vgui/hl2mp_logo.vmt" )
-    resource.AddFile( "materials/vgui/gfx/vgui/hl2mp_logo.vtf" )
-    resource.AddFile( "materials/vgui/gfx/vgui/not_available.vmt" )
-    resource.AddFile( "materials/vgui/gfx/vgui/not_available.vtf" )
-    resource.AddFile( "materials/vgui/gfx/vgui/round_corner_ne.vmt" )
-    resource.AddFile( "materials/vgui/gfx/vgui/round_corner_ne.vtf" )
-    resource.AddFile( "materials/vgui/gfx/vgui/round_corner_nw.vmt" )
-    resource.AddFile( "materials/vgui/gfx/vgui/round_corner_nw.vtf" )
-    resource.AddFile( "materials/vgui/gfx/vgui/round_corner_se.vmt" )
-    resource.AddFile( "materials/vgui/gfx/vgui/round_corner_se.vtf" )
-    resource.AddFile( "materials/vgui/gfx/vgui/round_corner_sw.vmt" )
-    resource.AddFile( "materials/vgui/gfx/vgui/round_corner_sw.vtf" )
-    resource.AddFile( "materials/vgui/gfx/vgui/solid_background.vmt" )
-    resource.AddFile( "materials/vgui/gfx/vgui/solid_background.vtf" )
-    resource.AddFile( "materials/vgui/gfx/vgui/spray_bullseye.vmt" )
-    resource.AddFile( "materials/vgui/gfx/vgui/spray_bullseye.vtf" )
-    resource.AddFile( "materials/vgui/gfx/vgui/trans_background.vmt" )
-    resource.AddFile( "materials/vgui/gfx/vgui/trans_background.vtf" )
-    resource.AddFile( "materials/vgui/loading.vmt" )
-    resource.AddFile( "materials/vgui/loading.vtf" )
-    resource.AddFile( "materials/vgui/logos/back.vmt" )
-    resource.AddFile( "materials/vgui/logos/back.vtf" )
-    resource.AddFile( "materials/vgui/logos/brainfork.vmt" )
-    resource.AddFile( "materials/vgui/logos/brainfork.vtf" )
-    resource.AddFile( "materials/vgui/logos/cross.vmt" )
-    resource.AddFile( "materials/vgui/logos/cross.vtf" )
-    resource.AddFile( "materials/vgui/logos/decomposing.vmt" )
-    resource.AddFile( "materials/vgui/logos/decomposing.vtf" )
-    resource.AddFile( "materials/vgui/logos/eat.vmt" )
-    resource.AddFile( "materials/vgui/logos/eat.vtf" )
-    resource.AddFile( "materials/vgui/logos/no.vmt" )
-    resource.AddFile( "materials/vgui/logos/no.vtf" )
-    resource.AddFile( "materials/vgui/logos/pent.vmt" )
-    resource.AddFile( "materials/vgui/logos/pent.vtf" )
-    resource.AddFile( "materials/vgui/logos/pressure.vmt" )
-    resource.AddFile( "materials/vgui/logos/pressure.vtf" )
-    resource.AddFile( "materials/vgui/logos/repent.vmt" )
-    resource.AddFile( "materials/vgui/logos/repent.vtf" )
-    resource.AddFile( "materials/vgui/logos/rip.vmt" )
-    resource.AddFile( "materials/vgui/logos/rip.vtf" )
-    resource.AddFile( "materials/vgui/logos/skull.vmt" )
-    resource.AddFile( "materials/vgui/logos/skull.vtf" )
-    resource.AddFile( "materials/vgui/logos/spray_canned.vmt" )
-    resource.AddFile( "materials/vgui/logos/spray_canned.vtf" )
-    resource.AddFile( "materials/vgui/logos/spray_combine.vmt" )
-    resource.AddFile( "materials/vgui/logos/spray_combine.vtf" )
-    resource.AddFile( "materials/vgui/logos/spray_cop.vmt" )
-    resource.AddFile( "materials/vgui/logos/spray_cop.vtf" )
-    resource.AddFile( "materials/vgui/logos/spray_dog.vmt" )
-    resource.AddFile( "materials/vgui/logos/spray_dog.vtf" )
-    resource.AddFile( "materials/vgui/logos/spray_freeman.vmt" )
-    resource.AddFile( "materials/vgui/logos/spray_freeman.vtf" )
-    resource.AddFile( "materials/vgui/logos/spray_head.vmt" )
-    resource.AddFile( "materials/vgui/logos/spray_head.vtf" )
-    resource.AddFile( "materials/vgui/logos/spray_lambda.vmt" )
-    resource.AddFile( "materials/vgui/logos/spray_lambda.vtf" )
-    resource.AddFile( "materials/vgui/logos/spray_plumbed.vmt" )
-    resource.AddFile( "materials/vgui/logos/spray_plumbed.vtf" )
-    resource.AddFile( "materials/vgui/logos/spray_soldier.vmt" )
-    resource.AddFile( "materials/vgui/logos/spray_soldier.vtf" )
-    resource.AddFile( "materials/vgui/logos/ui/back.vmt" )
-    resource.AddFile( "materials/vgui/logos/ui/brainfork.vmt" )
-    resource.AddFile( "materials/vgui/logos/ui/cross.vmt" )
-    resource.AddFile( "materials/vgui/logos/ui/decomposing.vmt" )
-    resource.AddFile( "materials/vgui/logos/ui/eat.vmt" )
-    resource.AddFile( "materials/vgui/logos/ui/no.vmt" )
-    resource.AddFile( "materials/vgui/logos/ui/pent.vmt" )
-    resource.AddFile( "materials/vgui/logos/ui/pressure.vmt" )
-    resource.AddFile( "materials/vgui/logos/ui/repent.vmt" )
-    resource.AddFile( "materials/vgui/logos/ui/rip.vmt" )
-    resource.AddFile( "materials/vgui/logos/ui/skull.vmt" )
-    resource.AddFile( "materials/vgui/logos/ui/spray_canned.vmt" )
-    resource.AddFile( "materials/vgui/logos/ui/spray_combine.vmt" )
-    resource.AddFile( "materials/vgui/logos/ui/spray_cop.vmt" )
-    resource.AddFile( "materials/vgui/logos/ui/spray_dog.vmt" )
-    resource.AddFile( "materials/vgui/logos/ui/spray_freeman.vmt" )
-    resource.AddFile( "materials/vgui/logos/ui/spray_head.vmt" )
-    resource.AddFile( "materials/vgui/logos/ui/spray_lambda.vmt" )
-    resource.AddFile( "materials/vgui/logos/ui/walk.vmt" )
-    resource.AddFile( "materials/vgui/logos/walk.vmt" )
-    resource.AddFile( "materials/vgui/logos/walk.vtf" )
-    resource.AddFile( "materials/vgui/miniarrows.vmt" )
-    resource.AddFile( "materials/vgui/miniarrows.vtf" )
-    resource.AddFile( "materials/vgui/miniceiling.vmt" )
-    resource.AddFile( "materials/vgui/miniceiling.vtf" )
-    resource.AddFile( "materials/vgui/minicrosshair.vmt" )
-    resource.AddFile( "materials/vgui/minicrosshair.vtf" )
-    resource.AddFile( "materials/vgui/minideletezombies.vmt" )
-    resource.AddFile( "materials/vgui/minideletezombies.vtf" )
-    resource.AddFile( "materials/vgui/minieye.vmt" )
-    resource.AddFile( "materials/vgui/minieye.vtf" )
-    resource.AddFile( "materials/vgui/minifigures.vmt" )
-    resource.AddFile( "materials/vgui/minifigures.vtf" )
-    resource.AddFile( "materials/vgui/minigroupadd.vmt" )
-    resource.AddFile( "materials/vgui/minigroupadd.vtf" )
-    resource.AddFile( "materials/vgui/minigroupselect.vmt" )
-    resource.AddFile( "materials/vgui/minigroupselect.vtf" )
-    resource.AddFile( "materials/vgui/miniselectall.vmt" )
-    resource.AddFile( "materials/vgui/miniselectall.vtf" )
-    resource.AddFile( "materials/vgui/minishield.vmt" )
-    resource.AddFile( "materials/vgui/minishield.vtf" )
-    resource.AddFile( "materials/vgui/minishockwave.vmt" )
-    resource.AddFile( "materials/vgui/minishockwave.vtf" )
-    resource.AddFile( "materials/vgui/miniskull.vmt" )
-    resource.AddFile( "materials/vgui/miniskull.vtf" )
-    resource.AddFile( "materials/vgui/minispotcreate.vmt" )
-    resource.AddFile( "materials/vgui/minispotcreate.vtf" )
-    resource.AddFile( "materials/vgui/playermodels/humans/group02/female_01.vmt" )
-    resource.AddFile( "materials/vgui/playermodels/humans/group02/female_01.vtf" )
-    resource.AddFile( "materials/vgui/playermodels/humans/group02/female_02.vmt" )
-    resource.AddFile( "materials/vgui/playermodels/humans/group02/female_02.vtf" )
-    resource.AddFile( "materials/vgui/playermodels/humans/group02/female_03.vmt" )
-    resource.AddFile( "materials/vgui/playermodels/humans/group02/female_03.vtf" )
-    resource.AddFile( "materials/vgui/playermodels/humans/group02/female_04.vmt" )
-    resource.AddFile( "materials/vgui/playermodels/humans/group02/female_04.vtf" )
-    resource.AddFile( "materials/vgui/playermodels/humans/group02/female_06.vmt" )
-    resource.AddFile( "materials/vgui/playermodels/humans/group02/female_06.vtf" )
-    resource.AddFile( "materials/vgui/playermodels/humans/group02/female_07.vmt" )
-    resource.AddFile( "materials/vgui/playermodels/humans/group02/female_07.vtf" )
-    resource.AddFile( "materials/vgui/playermodels/humans/group02/male_01.vmt" )
-    resource.AddFile( "materials/vgui/playermodels/humans/group02/male_01.vtf" )
-    resource.AddFile( "materials/vgui/playermodels/humans/group02/male_02.vmt" )
-    resource.AddFile( "materials/vgui/playermodels/humans/group02/male_02.vtf" )
-    resource.AddFile( "materials/vgui/playermodels/humans/group02/male_03.vmt" )
-    resource.AddFile( "materials/vgui/playermodels/humans/group02/male_03.vtf" )
-    resource.AddFile( "materials/vgui/playermodels/humans/group02/male_04.vmt" )
-    resource.AddFile( "materials/vgui/playermodels/humans/group02/male_04.vtf" )
-    resource.AddFile( "materials/vgui/playermodels/humans/group02/male_05.vmt" )
-    resource.AddFile( "materials/vgui/playermodels/humans/group02/male_05.vtf" )
-    resource.AddFile( "materials/vgui/playermodels/humans/group02/male_06.vmt" )
-    resource.AddFile( "materials/vgui/playermodels/humans/group02/male_06.vtf" )
-    resource.AddFile( "materials/vgui/playermodels/humans/group02/male_07.vmt" )
-    resource.AddFile( "materials/vgui/playermodels/humans/group02/male_07.vtf" )
-    resource.AddFile( "materials/vgui/playermodels/humans/group02/male_08.vmt" )
-    resource.AddFile( "materials/vgui/playermodels/humans/group02/male_08.vtf" )
-    resource.AddFile( "materials/vgui/playermodels/humans/group02/male_09.vmt" )
-    resource.AddFile( "materials/vgui/playermodels/humans/group02/male_09.vtf" )
-    resource.AddFile( "materials/vgui/playermodels/male_lawyer.vmt" )
-    resource.AddFile( "materials/vgui/playermodels/male_lawyer.vtf" )
-    resource.AddFile( "materials/vgui/playermodels/male_pi.vmt" )
-    resource.AddFile( "materials/vgui/playermodels/male_pi.vtf" )
-    resource.AddFile( "materials/vgui/zombies/banshee.vtf" )
-    resource.AddFile( "materials/vgui/zombies/banshee_small.vtf" )
-    resource.AddFile( "materials/vgui/zombies/drifter.vtf" )
-    resource.AddFile( "materials/vgui/zombies/drifter_small.vtf" )
-    resource.AddFile( "materials/vgui/zombies/hulk.vtf" )
-    resource.AddFile( "materials/vgui/zombies/hulk_small.vtf" )
-    resource.AddFile( "materials/vgui/zombies/immolator.vtf" )
-    resource.AddFile( "materials/vgui/zombies/immolator_small.vtf" )
-    resource.AddFile( "materials/vgui/zombies/info_banshee.vmt" )
-    resource.AddFile( "materials/vgui/zombies/info_drifter.vmt" )
-    resource.AddFile( "materials/vgui/zombies/info_hulk.vmt" )
-    resource.AddFile( "materials/vgui/zombies/info_immolator.vmt" )
-    resource.AddFile( "materials/vgui/zombies/info_shambler.vmt" )
-    resource.AddFile( "materials/vgui/zombies/queue_banshee.vmt" )
-    resource.AddFile( "materials/vgui/zombies/queue_drifter.vmt" )
-    resource.AddFile( "materials/vgui/zombies/queue_hulk.vmt" )
-    resource.AddFile( "materials/vgui/zombies/queue_immolator.vmt" )
-    resource.AddFile( "materials/vgui/zombies/queue_shambler.vmt" )
-    resource.AddFile( "materials/vgui/zombies/shambler.vtf" )
-    resource.AddFile( "materials/vgui/zombies/shambler_small.vtf" )
-    resource.AddFile( "materials/wood/woodshelf003a.vmt" )
-    resource.AddFile( "materials/wood/woodshelf003a.vtf" )
-	resource.AddFile( "materials/zmr_effects/flashlight_off.vmt" )
-	resource.AddFile( "materials/zmr_effects/flashlight_off.vtf" )
-	resource.AddFile( "materials/zmr_effects/flashlight_on.vmt" )
-	resource.AddFile( "materials/zmr_effects/flashlight_on.vtf" )
-	resource.AddFile( "materials/zmr_effects/hpbar_bg.vmt" )
-	resource.AddFile( "materials/zmr_effects/hpbar_bg.vtf" )
-	resource.AddFile( "materials/zmr_effects/hpbar_fg.vmt" )
-	resource.AddFile( "materials/zmr_effects/hpbar_fg.vtf" )
-	resource.AddFile( "materials/zmr_effects/hpbar_fg_critical.vmt" )
-	resource.AddFile( "materials/zmr_effects/hpbar_fg_critical.vtf" )
-	resource.AddFile( "materials/zmr_effects/hud_bg_ammo.vmt" )
-	resource.AddFile( "materials/zmr_effects/hud_bg_ammo.vtf" )
-	resource.AddFile( "materials/zmr_effects/hud_bg_hp.vmt" )
-	resource.AddFile( "materials/zmr_effects/hud_bg_hp.vtf" )
-	resource.AddFile( "materials/zmr_effects/hud_bg_spec.vmt" )
-	resource.AddFile( "materials/zmr_effects/hud_bg_spec.vtf" )
-	resource.AddFile( "materials/zmr_effects/hud_bg_spec_top.vmt" )
-	resource.AddFile( "materials/zmr_effects/hud_bg_spec_top.vtf" )
-    resource.AddFile( "materials/zm_overlay.png" )
-    resource.AddFile( "models/alphatest.mdl" )
-    resource.AddFile( "models/humans/zm_draggy.mdl" )
-    resource.AddFile( "models/items/revolverammo.mdl" )
-    resource.AddFile( "models/male_pi.mdl" )
-    resource.AddFile( "models/manipulatable.mdl" )
-    resource.AddFile( "models/props/bell.mdl" )
-    resource.AddFile( "models/props/deathball.mdl" )
-    resource.AddFile( "models/props/pew.mdl" )
-    resource.AddFile( "models/props/zm_metalladder001.mdl" )
-    resource.AddFile( "models/props_c17/oildrum001_asplode.mdl" )
-    resource.AddFile( "models/props_vehicles/apc001.mdl" )
-    resource.AddFile( "models/props_vehicles/apc_tire001.mdl" )
-    resource.AddFile( "models/props_vehicles/zmapc001.mdl" )
-    resource.AddFile( "models/props_vehicles/zmapc_tire001.mdl" )
-    resource.AddFile( "models/rallypoint.mdl" )
-    resource.AddFile( "models/spawnnode.mdl" )
-    resource.AddFile( "models/trap.mdl" )
-    resource.AddFile( "models/weapons/c_fists_zm.mdl" )
-    resource.AddFile( "models/weapons/c_flashlight_zm.mdl" )
-    resource.AddFile( "models/weapons/c_improvised_zm.mdl" )
-    resource.AddFile( "models/weapons/c_mac_zm.mdl" )
-    resource.AddFile( "models/weapons/c_molotov_zm.mdl" )
-    resource.AddFile( "models/weapons/c_pistol_zm.mdl" )
-    resource.AddFile( "models/weapons/c_revolver_zm.mdl" )
-    resource.AddFile( "models/weapons/c_rifle_zm.mdl" )
-    resource.AddFile( "models/weapons/c_shotgun_zm.mdl" )
-    resource.AddFile( "models/weapons/c_sledgehammer_zm.mdl" )
-    resource.AddFile( "models/weapons/flashlight3rd_zm.mdl" )
-    resource.AddFile( "models/weapons/invisible_vm.mdl" )
-    resource.AddFile( "models/weapons/molotov3rd_zm.mdl" )
-    resource.AddFile( "models/weapons/pistol3rd_zm.mdl" )
-    resource.AddFile( "models/weapons/rifle_zm_3rd.mdl" )
-    resource.AddFile( "models/weapons/shotgun_zm_3rd.mdl" )
-    resource.AddFile( "models/weapons/sledgehammer3rd_zm.mdl" )
-    resource.AddFile( "models/weapons/smg_zm_3rd.mdl" )
-    resource.AddFile( "models/weapons/w_null.mdl" )
-    resource.AddFile( "models/weapons/w_shotgun_zm.mdl" )
-    resource.AddFile( "models/zombie/burnzie.mdl" )
-    resource.AddFile( "models/zombie/hulk.mdl" )
-    resource.AddFile( "models/zombie/zm_classic.mdl" )
-    resource.AddFile( "models/zombie/zm_classic_01.mdl" )
-    resource.AddFile( "models/zombie/zm_classic_02.mdl" )
-    resource.AddFile( "models/zombie/zm_classic_03.mdl" )
-    resource.AddFile( "models/zombie/zm_classic_04.mdl" )
-    resource.AddFile( "models/zombie/zm_classic_05.mdl" )
-    resource.AddFile( "models/zombie/zm_classic_06.mdl" )
-    resource.AddFile( "models/zombie/zm_classic_07.mdl" )
-    resource.AddFile( "models/zombie/zm_classic_08.mdl" )
-    resource.AddFile( "models/zombie/zm_classic_09.mdl" )
-    resource.AddFile( "models/zombie/zm_classic_10.mdl" )
-    resource.AddFile( "models/zombie/zm_f4st.mdl" )
-    resource.AddFile( "models/zombie/zm_fast.mdl" )
-    resource.AddFile( "models/zombiespawner.mdl" )
-    resource.AddFile( "particles/zm_blood.pcf" )
-    resource.AddFile( "resource/fonts/deadfontwalking.ttf" )
-    resource.AddFile( "resource/fonts/verdanaru.ttf" )
-    resource.AddFile( "resource/fonts/zombiemaster.ttf" )
-    resource.AddFile( "resource/fonts/monofont.ttf" )
-    resource.AddFile( "sound/ambient/lightning.wav" )
-    resource.AddFile( "sound/bell/bell1.wav" )
-    resource.AddFile( "sound/common/talk.wav" )
-    resource.AddFile( "sound/npc/banshee/breathe_loop1.wav" )
-    resource.AddFile( "sound/npc/banshee/claw_miss1.wav" )
-    resource.AddFile( "sound/npc/banshee/claw_miss2.wav" )
-    resource.AddFile( "sound/npc/banshee/claw_strike1.wav" )
-    resource.AddFile( "sound/npc/banshee/claw_strike2.wav" )
-    resource.AddFile( "sound/npc/banshee/claw_strike3.wav" )
-    resource.AddFile( "sound/npc/banshee/foot1.wav" )
-    resource.AddFile( "sound/npc/banshee/foot2.wav" )
-    resource.AddFile( "sound/npc/banshee/foot3.wav" )
-    resource.AddFile( "sound/npc/banshee/foot4.wav" )
-    resource.AddFile( "sound/npc/banshee/fz_alert_close1.wav" )
-    resource.AddFile( "sound/npc/banshee/fz_alert_far1.wav" )
-    resource.AddFile( "sound/npc/banshee/fz_frenzy1.wav" )
-    resource.AddFile( "sound/npc/banshee/fz_frenzy2.wav" )
-    resource.AddFile( "sound/npc/banshee/fz_frenzy3.wav" )
-    resource.AddFile( "sound/npc/banshee/fz_frenzy4.wav" )
-    resource.AddFile( "sound/npc/banshee/fz_frenzy5.wav" )
-    resource.AddFile( "sound/npc/banshee/fz_frenzy6.wav" )
-    resource.AddFile( "sound/npc/banshee/fz_frenzy7.wav" )
-    resource.AddFile( "sound/npc/banshee/fz_scream1.wav" )
-    resource.AddFile( "sound/npc/banshee/fz_scream2.wav" )
-    resource.AddFile( "sound/npc/banshee/fz_scream3.wav" )
-    resource.AddFile( "sound/npc/banshee/gurgle_loop1.wav" )
-    resource.AddFile( "sound/npc/banshee/idle1.wav" )
-    resource.AddFile( "sound/npc/banshee/idle2.wav" )
-    resource.AddFile( "sound/npc/banshee/idle3.wav" )
-    resource.AddFile( "sound/npc/banshee/leap1.wav" )
-    resource.AddFile( "sound/npc/banshee/leap2.wav" )
-    resource.AddFile( "sound/npc/banshee/leap3_long.wav" )
-    resource.AddFile( "sound/npc/banshee/leap_begin.wav" )
-    resource.AddFile( "sound/npc/banshee/test.wav" )
-    resource.AddFile( "sound/npc/banshee/wake1.wav" )
-    resource.AddFile( "sound/npc/shamblie/claw_miss1.wav" )
-    resource.AddFile( "sound/npc/shamblie/claw_miss2.wav" )
-    resource.AddFile( "sound/npc/shamblie/claw_strike1.wav" )
-    resource.AddFile( "sound/npc/shamblie/claw_strike2.wav" )
-    resource.AddFile( "sound/npc/shamblie/claw_strike3.wav" )
-    resource.AddFile( "sound/npc/shamblie/foot1.wav" )
-    resource.AddFile( "sound/npc/shamblie/foot2.wav" )
-    resource.AddFile( "sound/npc/shamblie/foot3.wav" )
-    resource.AddFile( "sound/npc/shamblie/foot_slide1.wav" )
-    resource.AddFile( "sound/npc/shamblie/foot_slide2.wav" )
-    resource.AddFile( "sound/npc/shamblie/foot_slide3.wav" )
-    resource.AddFile( "sound/npc/shamblie/growl_0.wav" )
-    resource.AddFile( "sound/npc/shamblie/growl_1.wav" )
-    resource.AddFile( "sound/npc/shamblie/growl_2.wav" )
-    resource.AddFile( "sound/npc/shamblie/growl_3.wav" )
-    resource.AddFile( "sound/npc/shamblie/growl_4.wav" )
-    resource.AddFile( "sound/npc/shamblie/growl_5.wav" )
-    resource.AddFile( "sound/npc/shamblie/growl_6.wav" )
-    resource.AddFile( "sound/npc/shamblie/growl_7.wav" )
-    resource.AddFile( "sound/npc/shamblie/growl_8.wav" )
-    resource.AddFile( "sound/npc/shamblie/hit_0.wav" )
-    resource.AddFile( "sound/npc/shamblie/hit_1.wav" )
-    resource.AddFile( "sound/npc/shamblie/hit_2.wav" )
-    resource.AddFile( "sound/npc/shamblie/hit_3.wav" )
-    resource.AddFile( "sound/npc/shamblie/hit_4.wav" )
-    resource.AddFile( "sound/npc/shamblie/hit_5.wav" )
-    resource.AddFile( "sound/npc/shamblie/hit_6.wav" )
-    resource.AddFile( "sound/npc/shamblie/hit_7.wav" )
-    resource.AddFile( "sound/npc/shamblie/moan_loop1.wav" )
-    resource.AddFile( "sound/npc/shamblie/moan_loop2.wav" )
-    resource.AddFile( "sound/npc/shamblie/moan_loop3.wav" )
-    resource.AddFile( "sound/npc/shamblie/moan_loop4.wav" )
-    resource.AddFile( "sound/npc/shamblie/zombie_alert1.wav" )
-    resource.AddFile( "sound/npc/shamblie/zombie_alert2.wav" )
-    resource.AddFile( "sound/npc/shamblie/zombie_alert3.wav" )
-    resource.AddFile( "sound/npc/shamblie/zombie_die1.wav" )
-    resource.AddFile( "sound/npc/shamblie/zombie_die2.wav" )
-    resource.AddFile( "sound/npc/shamblie/zombie_die3.wav" )
-    resource.AddFile( "sound/npc/shamblie/zombie_hit.wav" )
-    resource.AddFile( "sound/npc/shamblie/zombie_pound_door.wav" )
-    resource.AddFile( "sound/npc/shamblie/zo_attack1.wav" )
-    resource.AddFile( "sound/npc/shamblie/zo_attack2.wav" )
-    resource.AddFile( "sound/powers/explosion_3.wav" )
-    resource.AddFile( "sound/powers/explosion_3_boom.wav" )
-    resource.AddFile( "sound/weapons/1molotov/mtov_break1.wav" )
-    resource.AddFile( "sound/weapons/1molotov/mtov_break2.wav" )
-    resource.AddFile( "sound/weapons/1molotov/mtov_flame1.wav" )
-    resource.AddFile( "sound/weapons/1molotov/mtov_flame2.wav" )
-    resource.AddFile( "sound/weapons/1molotov/mtov_flame3.wav" )
-    resource.AddFile( "sound/weapons/fists_zm/swing1.wav" )
-    resource.AddFile( "sound/weapons/flashlight_zm/flashlight_swing.wav" )
-    resource.AddFile( "sound/weapons/flashlight_zm/flashlight_swinghit.wav" )
-    resource.AddFile( "sound/weapons/pistol_zm/pistol_zm_empty.wav" )
-    resource.AddFile( "sound/weapons/pistol_zm/pistol_zm_fire1.wav" )
-    resource.AddFile( "sound/weapons/pistol_zm/pistol_zm_fire1_dist.wav" )
-    resource.AddFile( "sound/weapons/pistol_zm/pistol_zm_fire2.wav" )
-    resource.AddFile( "sound/weapons/pistol_zm/pistol_zm_fire2_dist.wav" )
-    resource.AddFile( "sound/weapons/pistol_zm/pistol_zm_reload1.wav" )
-    resource.AddFile( "sound/weapons/revolver_zm/revolver_fire.wav" )
-    resource.AddFile( "sound/weapons/revolver_zm/revolver_reload.wav" )
-    resource.AddFile( "sound/weapons/rifle_zm/zm_rifle_empty.wav" )
-    resource.AddFile( "sound/weapons/rifle_zm/zm_rifle_fire1.wav" )
-    resource.AddFile( "sound/weapons/rifle_zm/zm_rifle_fire2.wav" )
-    resource.AddFile( "sound/weapons/rifle_zm/zm_rifle_lever.wav" )
-    resource.AddFile( "sound/weapons/rifle_zm/zm_rifle_reload1.wav" )
-    resource.AddFile( "sound/weapons/rifle_zm/zm_rifle_reload2.wav" )
-    resource.AddFile( "sound/weapons/shotgun_zm/shotgun_cock_zm.wav" )
-    resource.AddFile( "sound/weapons/shotgun_zm/shotgun_dbl_fire.wav" )
-    resource.AddFile( "sound/weapons/shotgun_zm/shotgun_dbl_fire7_zm.wav" )
-    resource.AddFile( "sound/weapons/shotgun_zm/shotgun_dbl_fire7_zm_dist.wav" )
-    resource.AddFile( "sound/weapons/shotgun_zm/shotgun_empty_zm.wav" )
-    resource.AddFile( "sound/weapons/shotgun_zm/shotgun_fire6_zm.wav" )
-    resource.AddFile( "sound/weapons/shotgun_zm/shotgun_fire7_zm.wav" )
-    resource.AddFile( "sound/weapons/shotgun_zm/shotgun_fire7_zm_dist.wav" )
-    resource.AddFile( "sound/weapons/shotgun_zm/shotgun_fire7_zm_dist2.wav" )
-    resource.AddFile( "sound/weapons/shotgun_zm/shotgun_reload1_zm.wav" )
-    resource.AddFile( "sound/weapons/shotgun_zm/shotgun_reload2_zm.wav" )
-    resource.AddFile( "sound/weapons/shotgun_zm/shotgun_reload3_zm.wav" )
-    resource.AddFile( "sound/weapons/sledge_zm/sledge_swing.wav" )
-    resource.AddFile( "sound/weapons/sledge_zm/sledge_swingalt.wav" )
-    resource.AddFile( "sound/weapons/smg_zm/smg_fire.wav" )
-    resource.AddFile( "sound/weapons/smg_zm/smg_fire_distancefade.wav" )
-    resource.AddFile( "sound/weapons/smg_zm/smg_reload1.wav" )
-    resource.AddFile( "sound/weapons/smg_zm/smg_reload2.wav" )
-    resource.AddFile( "sound/weapons/smg_zm/smg_reload3.wav" )
-end
+net.Receive("zm_updateragdollpos", function(len, pl)
+    local pos = net.ReadVector()
+    if pl:Alive() or pl:Team() ~= TEAM_SPECTATOR then return end
+    pl:SetPos(pos)
+end)
+
+net.Receive("zm_mousemove", function(len, pl)
+    pl.m_flLastActivity = CurTime()
+end)

@@ -1,19 +1,25 @@
 NPC.CanClingToCeiling = true
-NPC.HullSizeMins = Vector(13, 13, 50)
-NPC.HullSizeMaxs = Vector(-13, -13, 0)
+NPC.bUseAdvancedZombieAI = false
+NPC.HullSizeMins = Vector(-13, -13, 0)
+NPC.HullSizeMaxs = Vector(13, 13, 52)
 
-NPC.Capabilities = bit.bor(CAP_FRIENDLY_DMG_IMMUNE, CAP_MOVE_JUMP, CAP_MOVE_GROUND, CAP_INNATE_RANGE_ATTACK1, CAP_INNATE_MELEE_ATTACK1, CAP_MOVE_CLIMB, CAP_SKIP_NAV_GROUND_CHECK)
+NPC.Capabilities = bit.bor(CAP_MOVE_JUMP, CAP_MOVE_GROUND, CAP_INNATE_RANGE_ATTACK1, CAP_INNATE_MELEE_ATTACK1, CAP_MOVE_CLIMB, CAP_SKIP_NAV_GROUND_CHECK)
 
 function NPC:OnSpawned(npc)
     self.BaseClass.OnSpawned(self, npc)
     
     npc.NextLeap = CurTime()
-    npc:SetNW2Bool("bClingingCeiling", false)
+    
+    if npc:IsNPC() then
+        npc:SetCeilingCling(false)
+    end
 end
 
 function NPC:OnKilled(npc, attacker, inflictor)
     self.BaseClass.OnKilled(self, npc, attacker, inflictor)
-    npc:SetNW2Bool("bClingingCeiling", false)
+    if npc:IsNPC() then
+        npc:SetCeilingCling(false)
+    end
 end
 
 function NPC:IsCeilingFlat(npc, plane_normal)
@@ -34,27 +40,34 @@ function NPC:CheckCeiling(npc, maxheight)
 
     if tr.Fraction ~= 1.0 and tr.HitWorld and not tr.HitSky then
         if self:IsCeilingFlat(npc, tr.HitNormal) then
-            local startpos = npc:GetPos()
-            local targetpos = tr.HitPos - Vector(0, 0, 12)
-            local targetang = npc:GetAngles()
-            targetang.roll = -180
-            
-            npc.OldPos = startpos
-            
-            local timername = "npc_gotoceiling:"..npc:EntIndex()
-            timer.Create(timername, 0, 0, function()
-                if not IsValid(npc) or not npc.m_bClinging then timer.Remove(timername) return end
+            if npc:IsNPC() then
+                local startpos = npc:GetPos()
+                local targetpos = tr.HitPos - Vector(0, 0, 12)
+                local targetang = npc:GetAngles()
+                targetang.roll = -180
                 
-                if npc:GetAngles() == targetang then
-                    timer.Remove(timername)
-                end
+                npc.OldPos = startpos
                 
-                local fraction = FrameTime() * 5.0
-                local topos = LerpVector(fraction, npc:GetPos(), targetpos)
-                local toang = LerpAngle(fraction, npc:GetAngles(), targetang)
-                npc:SetPos(topos)
-                npc:SetAngles(toang)
-            end)
+                local timername = "npc_gotoceiling:"..npc:EntIndex()
+                timer.Create(timername, 0, 0, function()
+                    if not IsValid(npc) or not npc.m_bClinging then timer.Remove(timername) return end
+                    
+                    if npc:GetAngles() == targetang then
+                        timer.Remove(timername)
+                    end
+                    
+                    local fraction = FrameTime() * 5.0
+                    local topos = LerpVector(fraction, npc:GetPos(), targetpos)
+                    local toang = LerpAngle(fraction, npc:GetAngles(), targetang)
+                    npc:SetPos(topos)
+                    npc:SetAngles(toang)
+                end)
+            else
+                local startpos = npc:GetPos()
+                local targetpos = tr.HitPos
+                
+                npc:AttachToCeiling( targetpos )
+            end
             
             return true
         end
@@ -84,31 +97,34 @@ end
 
 function NPC:OnForceGo(npc)
     if npc.m_bClinging then
-        self:DetachFromCeiling(npc)
+        if npc:IsNPC() then
+            self:DetachFromCeiling(npc)
+        else
+            npc:DetachFromCeiling()
+        end
     end
 end
 
 function NPC:DetachFromCeiling(npc)
-    npc:SetNW2Bool("bClingingCeiling", false)
-    npc:SetMoveType(self.MoveType)
-    
-    npc:SetPos(npc:GetPos() - Vector(0, 0, npc:OBBMaxs().z))
-    npc:SetAngles(Angle(0, 0, 0))
+    if npc:IsNPC() then
+        npc:SetCeilingCling(false)
+        npc:SetMoveType(self.MoveType)
+        npc:SetSolid(self.SolidType)
+        npc:RemoveSolidFlags(FSOLID_FORCE_WORLD_ALIGNED)
+        
+        npc:SetPos(npc:GetPos() - Vector(0, 0, npc:OBBMaxs().z))
+        npc:SetAngles(Angle(0, 0, 0))
+    else
+        if npc.m_bClinging then
+            npc:DetachFromCeiling()
+        end
+    end
 end
 
 function NPC:Think(npc)
     self.BaseClass.Think(self, npc)
     
-    local enemy = npc:GetEnemy()
-    if IsValid(enemy) then
-        local distance = npc:GetPos():Distance(enemy:GetPos())
-        if distance < 360 and distance > 32 then
-            if npc:HasCondition(COND_SEE_ENEMY) and not npc:HasCondition(COND_FLOATING_OFF_GROUND) and npc.NextLeap < CurTime() then    
-                npc.NextLeap = CurTime() + 4
-                npc:SetSchedule(SCHED_RANGE_ATTACK1)
-            end
-        end
-    end
+    if npc:IsNextBot() then return end
     
     if npc.m_bClinging and npc.m_flLastClingCheck and npc.m_flLastClingCheck < CurTime() then
         local nearest = self:GetClingAmbushTarget(npc)
@@ -120,6 +136,11 @@ function NPC:Think(npc)
         end
         
         npc.m_flLastClingCheck = CurTime() + 0.25
+    end
+    
+    local enemy = npc:GetEnemy()
+    if enemy and enemy:IsValid() and npc:IsUnreachable(enemy) then
+        npc:RunEngineTask("TASK_FASTZOMBIE_UNSTICK_JUMP")
     end
 end
 

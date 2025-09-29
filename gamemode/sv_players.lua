@@ -4,8 +4,7 @@ if not meta then return end
 meta.m_iZMPriority = 0
 
 function meta:SetZMPoints(points)
-    if points < 0 then points = 0 end
-    self:SetDTInt(1, points)
+    self:SetDTInt(1, math.Clamp(points, 0, GetConVar("zm_resource_limit"):GetInt()))
 end
 
 function meta:SetZMPointIncome(amount)
@@ -24,23 +23,25 @@ function meta:TakeZMPoints(amount)
 end
 
 function meta:ChangeTeamDelayed(delay, teamid)
-    timer.Simple(delay, function() self:SetTeam(teamid) end)
+    timer.Simple(delay, function() self:ChangeTeam(teamid) end)
 end
 
-meta.OldSetTeam = meta.OldSetTeam or meta.SetTeam
-function meta:SetTeam(teamid)
-    local oldteam = self:Team()
-    self:OldSetTeam(teamid)
-    if oldteam ~= teamid then
-        gamemode.Call("OnPlayerChangedTeam", self, oldteam, teamid)
-    end
+function meta:ChangeTeam(teamid)
+	local oldteam = self:Team()
+	self:SetTeam(teamid)
+	if oldteam ~= teamid then
+		hook.Call("OnPlayerChangedTeam", GAMEMODE, self, oldteam, teamid)
+	end
+
+	self:CollisionRulesChanged()
+	self:CollisionRulesChanged()
 end
 
 function meta:SetClass(class)
     local oldclass = player_manager.GetPlayerClass(self)
     player_manager.SetPlayerClass(self, class)
     if oldclass ~= class then
-        gamemode.Call("OnPlayerClassChanged", self, class)
+        hook.Call("OnPlayerClassChanged", GAMEMODE, self, class)
     end
 end
 
@@ -71,6 +72,7 @@ function meta:DropAllAmmo()
             
             local ammoclass = Either(ammotype == "buckshot", "item_box_"..ammotype, "item_ammo_"..ammotype)
             
+            ent.Dropped = true
             ent:SetClassName(ammoclass)
             ent.ClassName = ammoclass
             ent.Model = GAMEMODE.AmmoModels[ammoclass]
@@ -104,10 +106,46 @@ end
 
 meta.OldGetObserverTarget = meta.OldGetObserverTarget or meta.GetObserverTarget
 function meta:GetObserverTarget()
-    local ent = self:OldGetObserverTarget()
     if self:GetObserverMode() == OBS_MODE_ROAMING then
         return NULL
     end
+    return self:OldGetObserverTarget()
+end
+
+meta.OldPickupObject = meta.OldPickupObject or meta.PickupObject
+function meta:PickupObject(ent)
+    if self:IsHolding() then
+        if ent == self.CarryProp then self:DropObject() end
+        return
+    end
     
-    return ent
+    if not ent.m_AntiPropFly then
+        ent.m_AntiPropFly = {}
+    end
+
+    if ent.m_AntiPropFly[self] and ent.m_AntiPropFly[self] >= CurTime() then return end
+    
+    local pickup = ents.Create("prop_player_pickup")
+    if pickup:IsValid() then
+        pickup:SetPos(self:GetShootPos())
+        pickup:SetOwner(self)
+        pickup:SetParent(self)
+        pickup:SetObject(ent)
+        pickup:Spawn()
+
+        ent.m_AntiPropFly[self] = CurTime() + 1.5
+        ent.m_AntiPropFlyCallbackID = ent:AddCallback("PhysicsCollide", function(ent, data)
+            if ent:OnGround() then
+                table.Empty(ent.m_AntiPropFly)
+                ent:RemoveCallback("PhysicsCollide", ent.m_AntiPropFlyCallbackID)
+            end
+        end)
+    end
+end
+
+meta.OldDropObject = meta.OldDropObject or meta.DropObject
+function meta:DropObject()
+    if self.player_pickup and self.player_pickup:IsValid() then
+        self.player_pickup:Remove()
+    end
 end

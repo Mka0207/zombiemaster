@@ -85,7 +85,7 @@ end
 -- @return amount Integer: amount of zombies
 ----------------------------------------------------
 local function get_zombie_population()
-    return gamemode.Call("GetCurZombiePop")
+    return hook.Call("GetCurZombiePop", GAMEMODE)
 end
 
 ----------------------------------------------------
@@ -103,7 +103,7 @@ end
 -- @return amount Integer: number of zombie types
 ----------------------------------------------------
 local function get_zombie_type_amount()
-    return table.Count(gamemode.Call("GetZombieTable", false))
+    return table.Count(hook.Call("GetZombieTable", GAMEMODE, false))
 end
 
 ----------------------------------------------------
@@ -248,7 +248,7 @@ end
 -- Check if given ent is a zombie
 ----------------------------------------------------
 local function check_zombie_class(ent)
-    for _, zb in pairs(gamemode.Call("GetZombieTable", false)) do
+    for _, zb in pairs(hook.Call("GetZombieTable", GAMEMODE, false)) do
         if (ent:GetClass() == zb.Class) then return true end
     end
     return false
@@ -518,7 +518,7 @@ end
 -- @return zb String: The zombie to use as class
 ----------------------------------------------------
 local function pick_zombie()
-    local tb = gamemode.Call("GetZombieTable", false)
+    local tb = hook.Call("GetZombieTable", GAMEMODE, false)
     local zb = "npc_zombie"
     for _, zm in pairs(tb) do -- Finds zombie
         if (get_zombie_chance() == 0) then zb = zm.Class end -- Checks if this is the zombie to use
@@ -542,10 +542,10 @@ local function spawn_zombie(ent)
             if (options.Debug) then zmBot:Say("Attempt to spawn zombie failed... Query: " .. #ent.query) end
             return nil 
         end
-        local data = gamemode.Call("GetZombieData", zb)
+        local data = hook.Call("GetZombieData", GAMEMODE, zb)
         if ((data) && (#ent.query < 18)) then
             local zombieFlags = ent:GetZombieFlags() or 0
-            allowed = gamemode.Call("CanSpawnZombie", data.Flag or 0, zombieFlags)
+            allowed = hook.Call("CanSpawnZombie", GAMEMODE, data.Flag or 0, zombieFlags)
             if (!allowed) then zb = pick_zombie() end
             attempts = attempts + 1
         end
@@ -734,7 +734,7 @@ end
 -- Spawns the AI bot
 ----------------------------------------------------
 local function create_zm_bot()
-    if ((!game.SinglePlayer()) && (#player.GetAll() < game.MaxPlayers()) && (player.GetCount() >= 1) && #player.GetBots() == 0) then
+    if ((!game.SinglePlayer()) && (player.GetCount() < game.MaxPlayers()) && (player.GetCount() >= 1) && #player.GetBots() == 0) then
         local bot = player.CreateNextBot(names[math.random(#names)]) -- Create a bot given the name list
         bot.IsZMBot = true -- Set bot as ZM bot
         zmBot = bot -- Assign bot as global for usage
@@ -774,6 +774,15 @@ end )
 -- CMDs
 -- Console Commands for bot
 ----------------------------------------------------
+
+-- Find Creation ID of Ents
+concommand.Add( "zm_debug_creation_id", function(ply, cmd, args)
+    if (not ply:IsValid() or ply:IsAdmin()) then
+        for _, ent in pairs(ents.FindByClass("info_manipulate")) do  -- Gets all traps
+            print("Pos: " .. tostring(ent:GetPos()) .. " Name : " .. ent:GetName() .. " CreationID: " .. ent:MapCreationID())
+        end
+    end
+end )
 
 -- Bot Global Speed Delay
 concommand.Add( "zm_ai_speed", function(ply, cmd, args)
@@ -837,7 +846,7 @@ end )
 -- Forces the round to begin
 concommand.Add( "zm_ai_force_start_round", function(ply, cmd, args)
     if (ply:IsAdmin()) then 
-        gamemode.Call("EndRound")
+        hook.Call("EndRound", GAMEMODE)
         zmBot:Say("Round forcefully started")
     end
 end )

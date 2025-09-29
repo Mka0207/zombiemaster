@@ -1,6 +1,6 @@
 chat.OldAddText = chat.OldAddText or chat.AddText
 function chat.AddText(...)
-    if IsValid(GAMEMODE.PlayerLobby) then
+    if IsValid(GAMEMODE.PlayerLobby) and not GetConVar("zm_classic_lobbymenu"):GetBool() then
         GAMEMODE.PlayerLobby:AddChatText({...})
         return
     end
@@ -23,6 +23,17 @@ local function DrawFadedLine(self, w, h)
 end
 local function LobbyMenuPaint(self)
     return true
+end
+local function LobbyMenuThink(self)
+    if GAMEMODE:GetRoundActive() then
+        self:Close()
+    end
+    return true
+end
+local function ReadyButtonThink(self)
+    if GAMEMODE:GetRoundActive() or not IsValid(GAMEMODE.PlayerLobby) then
+        self:Remove()
+    end
 end
 local function OutlinedDraw(self, w, h)
     surface.SetDrawColor(clrOutline)
@@ -57,10 +68,105 @@ local function AddPlayerToList(self, pl)
     
     self.PlayerPanels[pl] = panel
 end
+local function OpenClassicLobby()
+    local lobby = vgui.Create("DFrame")
+    lobby:SetSize(ScrW() * 0.3, ScrH() * 0.5)
+    lobby:Center()
+    lobby:ShowCloseButton(false)
+    lobby:SetTitle("")
+    lobby:SetPopupStayAtBack(true)
+    lobby:MakePopup()
+    lobby:SetKeyboardInputEnabled(false)
+    lobby.Think = LobbyMenuThink
+    GAMEMODE.PlayerLobby = lobby
+    
+    local lobbytext = vgui.Create("DLabel", lobby)
+    lobbytext:SetText(translate.Get("waiting_message"))
+    lobbytext:SetFont("zm_hud_font_small")
+    lobbytext:SizeToContents()
+    lobbytext:Center()
+    lobbytext:AlignTop(4)
+    
+    local lastwarntim = -1
+    function lobbytext:Think()
+        if player.GetCount()  > 1 and GAMEMODE:GetReadyCount() ~= -1 then
+            local time = math.max(0, GAMEMODE:GetReadyCount() - CurTime())
+            local col = color_white
+            
+            if time < 5 then
+                local glow = math.sin(RealTime() * 8) * 200 + 255
+                col = Color(255, glow, glow)
+            else
+                col = color_white
+            end
+            
+            self:SetText(string.FormattedTime(time, "%02i:%02i"))
+            self:SetTextColor(col)
+            self:SizeToContents()
+            self:Center()
+            self:AlignTop(4)
+        end
+    end
+    
+    GAMEMODE.PlayerLobby.LobbyText = lobbytext
+    
+    local lobbylist = vgui.Create("DScrollPanel", lobby)
+    lobbylist:Dock(FILL)
+    lobbylist:MoveBelow(lobbytext, 4)
+    lobbylist.PlayerPanels = {}
+    lobbylist.AddPlayer = AddPlayerToList
+    lobbylist.Think = function(self)
+        if RealTime() >= (self.NextRefresh or 0) then
+            self.NextRefresh = RealTime() + 0.5
+            for _, pl in ipairs(player.GetAllNoCopy()) do
+                self:AddPlayer(pl)
+            end
+        end
+    end
+    GAMEMODE.PlayerLobby.PlayerList = lobbylist
+    
+    local readybut = vgui.Create("DButton")
+    readybut:SetFont("zm_hud_font_small")
+    readybut:SetSize(ScrW() * 0.09, ScrH() * 0.05)
+    readybut:Center()
+    readybut:MoveBelow(lobby, 8)
+    readybut:SetText(GAMEMODE.PlayerReadyList[MySelf] and translate.Get("lobby_unready") or translate.Get("lobby_ready"))
+    readybut.Think = ReadyButtonThink
+    GAMEMODE.ReadyButton = readybut
+    
+    function GAMEMODE.ReadyButton:DoClick()
+        if GAMEMODE:GetGameStarting() or (self.Cooldown or 0) > CurTime() then return end
+        
+        local MySelf = MySelf
+        GAMEMODE.PlayerReadyList[MySelf] = not GAMEMODE.PlayerReadyList[MySelf]
+        
+        if GAMEMODE.PlayerReadyList[MySelf] then
+            surface.PlaySound("buttons/button17.wav")
+        else
+            surface.PlaySound("buttons/button18.wav")
+        end
+        
+        self:SetTextColor(GAMEMODE.PlayerReadyList[MySelf] and Color(255, 0, 0) or Color(0, 255, 0))
+        self:SetText(GAMEMODE.PlayerReadyList[MySelf] and translate.Get("lobby_unready") or translate.Get("lobby_ready"))
+        self:SetSize(ScrW() * 0.09, ScrH() * 0.05)
+        self:Center()
+        self:MoveBelow(lobby, 8)
+        
+        net.Start("zm_playeready")
+            net.WriteBool(GAMEMODE.PlayerReadyList[MySelf])
+        net.SendToServer()
+        
+        self.Cooldown = CurTime() + 1
+    end
+end
 local function OpenLobby()
-    if IsValid(GAMEMODE.PlayerLobby) then
-        GAMEMODE.PlayerLobby:SetVisible(true)
+    if GetConVar("zm_classic_lobbymenu"):GetBool() then
+        OpenClassicLobby()
         return
+    end
+    
+    if IsValid(GAMEMODE.PlayerLobby) then
+        GAMEMODE.PlayerLobby:Close()
     end
     
     local lobbypanel = vgui.Create("DFrame")
@@ -68,10 +174,13 @@ local function OpenLobby()
     lobbypanel.btnMaxim:SetVisible(false)
     lobbypanel.btnMinim:SetVisible(false)
     lobbypanel:SetDraggable(false)
+    lobbypanel:SetDeleteOnClose(true)
+    lobbypanel:SetPopupStayAtBack(true)
     lobbypanel:SetTitle(" ")
     lobbypanel:SetSize(ScrW(), ScrH())
     lobbypanel:Center()
     lobbypanel.Paint = LobbyMenuPaint
+    lobbypanel.Think = LobbyMenuThink
     lobbypanel.AddChatText = function(self, tab)
         self.ChatBox:AppendMessage(tab)
     end
@@ -122,7 +231,7 @@ local function OpenLobby()
     playercontainer.Think = function(self)
         if RealTime() >= (self.NextRefresh or 0) then
             self.NextRefresh = RealTime() + 0.5
-            for _, pl in pairs(player.GetAll()) do
+            for _, pl in ipairs(player.GetAllNoCopy()) do
                 self:AddPlayer(pl)
             end
         end
@@ -130,7 +239,7 @@ local function OpenLobby()
     
     timetostart:AlignTop((playercontainer:GetTall() - timetostart:GetTall()) * 0.0325)
     
-    for _, pl in pairs(player.GetAll()) do
+    for _, pl in ipairs(player.GetAllNoCopy()) do
         playercontainer:AddPlayer(pl)
     end
     
@@ -210,7 +319,7 @@ local function OpenLobby()
     textentry:SetHistoryEnabled(true)
     textentry:SetSize(textpanel:GetSize())
     textentry.OnEnter = function(self)
-        LocalPlayer():ConCommand("say "..self:GetValue())
+        MySelf:ConCommand("say "..self:GetValue())
         
         self:AddHistory(self:GetValue())
         self:SetText("")
@@ -230,7 +339,12 @@ local function OpenLobby()
             if IsColor(info) then
                 self:InsertColorChange(info.r, info.g, info.b, 255)
             else
-                self:AppendText(IsEntity(info) and info:IsPlayer() and info:Nick() or tostring(info))
+                local isply = IsEntity(info) and info:IsPlayer()
+                if isply then
+                    self:InsertColorChange(255, 64, 64, 255)
+                end
+                
+                self:AppendText(isply and info:Nick() or tostring(info))
                 self:InsertColorChange(255, 255, 255, 255)
             end
         end
@@ -263,28 +377,28 @@ local function OpenLobby()
     readyb:Dock(RIGHT)
     readyb:DockMargin(ScreenScale(2), ScreenScale(3), ScreenScale(2), ScreenScale(3))
     readyb:SetFont("zm_hud_font_tiny")
-    readyb:SetText(GAMEMODE.playerReadyList[LocalPlayer()] and translate.Get("lobby_unready") or translate.Get("lobby_ready"))
+    readyb:SetText(GAMEMODE.PlayerReadyList[MySelf] and translate.Get("lobby_unready") or translate.Get("lobby_ready"))
     readyb:SizeToContents()
     readyb:SetTextColor(Color(0, 255, 0))
     
     function readyb:DoClick()
         if GAMEMODE:GetGameStarting() or (self.Cooldown or 0) > CurTime() then return end
         
-        local MySelf = LocalPlayer()
-        GAMEMODE.playerReadyList[MySelf] = not GAMEMODE.playerReadyList[MySelf]
+        local MySelf = MySelf
+        GAMEMODE.PlayerReadyList[MySelf] = not GAMEMODE.PlayerReadyList[MySelf]
         
-        if GAMEMODE.playerReadyList[MySelf] then
+        if GAMEMODE.PlayerReadyList[MySelf] then
             surface.PlaySound("buttons/button17.wav")
         else
             surface.PlaySound("buttons/button18.wav")
         end
         
-        self:SetTextColor(GAMEMODE.playerReadyList[MySelf] and Color(255, 0, 0) or Color(0, 255, 0))
-        self:SetText(GAMEMODE.playerReadyList[MySelf] and translate.Get("lobby_unready") or translate.Get("lobby_ready"))
+        self:SetTextColor(GAMEMODE.PlayerReadyList[MySelf] and Color(255, 0, 0) or Color(0, 255, 0))
+        self:SetText(GAMEMODE.PlayerReadyList[MySelf] and translate.Get("lobby_unready") or translate.Get("lobby_ready"))
         self:SizeToContents()
         
         net.Start("zm_playeready")
-            net.WriteBool(GAMEMODE.playerReadyList[MySelf])
+            net.WriteBool(GAMEMODE.PlayerReadyList[MySelf])
         net.SendToServer()
         
         self.Cooldown = CurTime() + 1
@@ -360,7 +474,7 @@ end
 
 function PANEL:Think()
     if IsValid(self.m_Player) then
-        local bReady = GAMEMODE.playerReadyList[self.m_Player]
+        local bReady = GAMEMODE.PlayerReadyList[self.m_Player]
         if self.OldReady ~= bReady then
             self.OldReady = bReady
             self.m_ReadyLabel:SetText(bReady and translate.Get("lobby_ready") or translate.Get("lobby_not_ready"))

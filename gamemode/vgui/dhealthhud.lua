@@ -8,7 +8,7 @@ function PANEL:Init()
     
     self.HealthLabel = vgui.Create("CHudHealthLabel", self)
     self.HealthLabel:SetFont("ZMHudNumbers")
-    self.HealthLabel:SetText(LocalPlayer():Health())
+    self.HealthLabel:SetText(MySelf:Health())
     
     self:ParentToHUD()
 end
@@ -35,15 +35,15 @@ function PANEL:PerformLayout()
 end
 
 function PANEL:Think()
-    if not LocalPlayer():IsSurvivor() or cvars.Number("zm_hudtype", 0) ~= HUD_ZMR then
+    if not MySelf:IsSurvivor() or cvars.Number("zm_hudtype", 0) ~= HUD_ZMR then
         self:Remove()
         return
     end
     
-    local health = LocalPlayer():Health()
+    local health = MySelf:Health()
     if health ~= self.OldHealth then
         self.OldHealth = health
-        self.HealthLabel:SetText(LocalPlayer():Health())
+        self.HealthLabel:SetText(MySelf:Health())
         self:InvalidateLayout()
     end
 end
@@ -100,8 +100,8 @@ function PANEL:Paint(dw, dh)
     local OffX = (dw - w) * 0.5
     local OffY = (dh - h) * 0.5
     
-    local maxhp = LocalPlayer():GetMaxHealth()
-    local hp = math.Clamp(LocalPlayer():Health(), 0, maxhp)
+    local maxhp = MySelf:GetMaxHealth()
+    local hp = math.Clamp(MySelf:Health(), 0, maxhp)
     local frac = 1 - (hp / maxhp)
     local iscrit = hp < (maxhp * 0.35)
     
@@ -131,11 +131,11 @@ local PANEL = {}
 
 function PANEL:Paint(w, h)
     local health = tonumber(self:GetText())
-    if LocalPlayer().CurrentHP ~= health then
-        LocalPlayer().CurrentHP = health
+    if MySelf.CurrentHP ~= health then
+        MySelf.CurrentHP = health
         
-        LocalPlayer().LastHurtTime = CurTime()
-        LocalPlayer().HurtTimer = CurTime() + 5
+        MySelf.LastHurtTime = CurTime()
+        MySelf.HurtTimer = CurTime() + 5
     end
     
     local healthCol = health <= 10 and Color(185, 0, 0, 255) or health <= 30 and Color(150, 50, 0) or health <= 60 and Color(255, 200, 0) or color_white
@@ -145,7 +145,7 @@ function PANEL:Paint(w, h)
     end
     
     DisableClipping(true)
-    draw.SimpleTextBlurry(health, self:GetFont(), 0, 0, healthCol, -1, -1, LocalPlayer().LastHurtTime, LocalPlayer().HurtTimer)
+    draw.SimpleTextBlurry(health, self:GetFont(), 0, 0, healthCol, -1, -1, MySelf.LastHurtTime, MySelf.HurtTimer)
     DisableClipping(false)
     
     return true

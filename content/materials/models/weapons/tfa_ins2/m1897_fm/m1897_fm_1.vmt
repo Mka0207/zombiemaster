@@ -1,0 +1,13 @@
+VertexLitGeneric
+{
+	$basetexture models\weapons\tfa_ins2\m1897_fm\m1897_fm_1
+	$bumpmap models\weapons\tfa_ins2\m1897_fm\m1897_fm_1_n
+	$phongexponenttexture	models\weapons\tfa_ins2\m1897_fm\m1897_fm_1_e
+	$phong						  "1"
+	$phongboost					 "16"
+	$phongfresnelranges			 "[0.2 0.7 1.0]"
+
+	$envmap						 "env_cubemap"
+	$normalmapalphaenvmapmask	   "1"
+	$envmaptint					 "[0.325 0.35 0.3]"
+}

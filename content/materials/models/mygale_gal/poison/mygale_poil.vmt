@@ -1,0 +1,6 @@
+"VertexLitGeneric"
+{
+	"$baseTexture" "models/mygale_gal/poison/mygale_poil"
+	"$translucent" "1"
+	"$model" 1
+}

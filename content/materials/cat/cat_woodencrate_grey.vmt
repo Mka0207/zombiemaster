@@ -1,0 +1,5 @@
+"VertexlitGeneric"
+{
+	"$basetexture" "cat/cat_woodencrate_grey"
+	"$surfaceprop" "Wood_Crate"
+}

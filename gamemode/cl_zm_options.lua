@@ -4,13 +4,12 @@ CreateClientConVar("zm_scrollwheelsensativity", "20", true, false, "How sensitiv
 
 CreateClientConVar("zm_dropweaponkey", "12", true, false, "Key enum to use for dropping your currently held weapon.")
 CreateClientConVar("zm_dropammokey", "32", true, false, "Key enum to use for dropping your currently held weapons ammo.")
-CreateClientConVar("zm_killzombieskey", "73", true, false, "Key enum to use for killing all selected zombies.")
+CreateClientConVar("zm_killzombieskey", "73", true, true, "Key enum to use for killing all selected zombies.")
+CreateClientConVar("zm_teleportkey", "18", true, true, "Key enum to use for teleporting to humans.")
 
-CreateClientConVar("zm_vision_quality", "2", true, false, "The quality of the zombie master vision drawing.")
 CreateClientConVar("zm_cl_spawntype", "1", true, false, "Set the spawn effect type of zombies.")
-CreateClientConVar("zm_cl_nightvision_type", "0", true, false, "Sets the type of nightvision the ZM uses.")
+CreateClientConVar("zm_cl_nightvision_type", "0", true, false, "Sets the type of NightVision the ZM uses.")
 CreateClientConVar("zm_cl_enablehints", "1", true, false, "Enable hints that guide you as Zombie Master.")
-CreateClientConVar("zm_silhouette_zmvision_only", "0", true, false, "Only draw silhouettes when ZM Vision is active.")
 
 CreateClientConVar("zm_shouldragdollsfade", "1", true, false, "Should ragdolls spawned by zombies fade out?")
 CreateClientConVar("zm_cl_ragdoll_fadetime", "30", true, false, "How much time in seconds before the ragdolls fadeout.")
@@ -18,13 +17,11 @@ CreateClientConVar("zm_cl_ragdoll_fadetime", "30", true, false, "How much time i
 CreateClientConVar("zm_healthcircle_brightness", "0.5", true, false, "Healthcircle brightness between 1.0 and 0.0, where 1.0 is brightest and 0.0 is off. Clientside.")
 CreateClientConVar("zm_cl_scrollspeed", "40", true, true, "How fast the speed is for the Zombie Master when using scroll to move up and down.")
 
-CreateClientConVar("zm_cl_silhouette_strength", "1", true, false, "How bright the silhouette drawing of zombies will be.")
-
 CreateClientConVar("zm_hudtype", "0", true, false, "What HUD style humans will use.")
 cvars.AddChangeCallback("zm_hudtype", function( convar_name, value_old, value_new )
     if not GAMEMODE then return end
     
-    local ply = LocalPlayer()
+    local ply = MySelf
     if ply:Alive() and ply.IsSurvivor and ply:IsSurvivor() then
         if tonumber(value_new) == HUD_ZMR and not IsValid(GAMEMODE.HumanHealthHUD) then
             GAMEMODE.HumanHealthHUD = vgui.Create("CHudHealthInfo")
@@ -32,6 +29,46 @@ cvars.AddChangeCallback("zm_hudtype", function( convar_name, value_old, value_ne
             GAMEMODE.HumanHealthHUD:Remove()
         end
     end
+end)
+
+GM.TransparencyRadius = math.Clamp(CreateClientConVar("zm_transparencyradius", 140, true, false):GetInt(), 0, 2048) ^ 2
+cvars.AddChangeCallback("zm_transparencyradius", function(cvar, oldvalue, newvalue)
+	GAMEMODE.TransparencyRadius = math.Clamp(tonumber(newvalue) or 0, 0, 2048) ^ 2
+end)
+
+GM.DisableFPHands = CreateClientConVar("zm_disable_hands", "0", true, false):GetBool()
+cvars.AddChangeCallback("zm_disable_hands", function(cvar, oldvalue, newvalue)
+	GAMEMODE.DisableFPHands = tobool(newvalue)
+end)
+
+GM.ColorModEnabled = CreateClientConVar("zm_cl_enablecolormod", "1", true, false):GetBool()
+cvars.AddChangeCallback("zm_cl_enablecolormod", function(cvar, oldvalue, newvalue)
+	GAMEMODE.ColorModEnabled = tobool(newvalue)
+end)
+
+GM.FlashlightLinear = GetConVar("r_flashlightlinear"):GetFloat()
+cvars.AddChangeCallback("r_flashlightlinear", function(cvar, oldvalue, newvalue)
+	GAMEMODE.FlashlightLinear = tonumber(newvalue)
+end)
+
+GM.FlashlightFOV = GetConVar("r_flashlightfov"):GetFloat()
+cvars.AddChangeCallback("r_flashlightfov", function(cvar, oldvalue, newvalue)
+	GAMEMODE.FlashlightFOV = tonumber(newvalue)
+end)
+
+GM.bDisableGore = CreateClientConVar("zm_cl_disable_gore", "0", true, false):GetBool()
+cvars.AddChangeCallback("zm_cl_disable_gore", function(cvar, oldvalue, newvalue)
+	GAMEMODE.bDisableGore = tobool(newvalue)
+end)
+
+GM.bCustomViewModelHands = CreateClientConVar("zm_cl_custom_hands", "1", true, true):GetBool()
+cvars.AddChangeCallback("zm_cl_custom_hands", function(cvar, oldvalue, newvalue)
+	GAMEMODE.bCustomViewModelHands = tobool(newvalue)
+end)
+
+GM.bCustomViewModelButNoLegs = CreateClientConVar("zm_cl_custom_hands_no_legs", "0", true, false):GetBool()
+cvars.AddChangeCallback("zm_cl_custom_hands_no_legs", function(cvar, oldvalue, newvalue)
+	GAMEMODE.bCustomViewModelButNoLegs = tobool(newvalue)
 end)
 
 GM.SelectRingMaterial = CreateMaterial("CommandRingMat", "UnlitGeneric", {
@@ -47,7 +84,7 @@ GM.RallyRingMaterial = CreateMaterial("RallyRingMat", "UnlitGeneric", {
     ["$nocull"] = 1
 })
 local function LocationTrace(ent)
-    return not (ent:IsPlayer() or ent:IsNPC())
+    return not (ent:IsPlayer() or ent:IsNPC() or ent:IsNextBot())
 end
 
 local function ZM_Open_Preferred_Menu(ply)
@@ -63,17 +100,17 @@ local function ZM_Power_PhysExplode(ply)
     
     ply:PrintTranslatedMessage(HUD_PRINTTALK, "enter_explosion_mode")
     
-    if not gamemode.Call("OverridePowerHooks", "Shockwave") then
+    if not hook.Call("OverridePowerHooks", GAMEMODE, "Shockwave") then
         hook.Add("GUIMousePressed", "GUIMousePressed.Shockwave", function(mouseCode, aimVector)
             if mouseCode == MOUSE_LEFT then
                 net.Start("zm_place_physexplode")
                     net.WriteVector(aimVector)
                 net.SendToServer()
                 
-                local tab = gamemode.Call("GenerateClickedQuadTable", GAMEMODE.SelectRingMaterial, 0.3, aimVector, LocationTrace)
+                local tab = hook.Call("GenerateClickedQuadTable", GAMEMODE, GAMEMODE.SelectRingMaterial, 0.3, aimVector, LocationTrace)
                 tab.bGrow = true
                 
-                gamemode.Call("AddQuadDraw", tab)
+                hook.Call("AddQuadDraw", GAMEMODE, tab)
                 
                 hook.Remove("GUIMousePressed", "GUIMousePressed.Shockwave")
             elseif mouseCode == MOUSE_RIGHT then
@@ -99,7 +136,7 @@ local function ZM_Power_SpotCreate(ply)
         local tr = util.QuickTrace(ply:GetShootPos(), gui.ScreenToVector(gui.MousePos()) * 10000, player.GetAll())
         hiddenent:SetPos(tr.HitPos)
         hiddenent.RenderOverride = function(self)
-            local ret = gamemode.Call("CanHiddenZombieBeCreated", ply, ply:EyePos(), gui.ScreenToVector(gui.MousePos()))
+            local ret = hook.Call("CanHiddenZombieBeCreated", GAMEMODE, ply, ply:EyePos(), gui.ScreenToVector(gui.MousePos()))
             if ret then
                 render.SetColorModulation(0, 1, 0)
             else
@@ -119,7 +156,7 @@ local function ZM_Power_SpotCreate(ply)
         GAMEMODE.HiddenCSEnt = hiddenent
     end
     
-    if not gamemode.Call("OverridePowerHooks", "Hidden") then
+    if not hook.Call("OverridePowerHooks", GAMEMODE, "Hidden") then
         hook.Add("GUIMousePressed", "GUIMousePressed.HiddenZombie", function(mouseCode, aimVector)
             if mouseCode == MOUSE_LEFT then
                 net.Start("zm_place_zombiespot")
@@ -130,9 +167,13 @@ local function ZM_Power_SpotCreate(ply)
                     GAMEMODE.HiddenCSEnt:Remove()
                 end
                 
-                gamemode.Call("AddQuadDraw", gamemode.Call("GenerateClickedQuadTable", GAMEMODE.SelectRingMaterial, 0.3, aimVector, LocationTrace))
+                hook.Call("AddQuadDraw", GAMEMODE, hook.Call("GenerateClickedQuadTable", GAMEMODE, GAMEMODE.SelectRingMaterial, 0.3, aimVector, LocationTrace))
                 hook.Remove("GUIMousePressed", "GUIMousePressed.HiddenZombie")
             elseif mouseCode == MOUSE_RIGHT then
+                if IsValid(GAMEMODE.HiddenCSEnt) then
+                    GAMEMODE.HiddenCSEnt:Remove()
+                end
+                
                 ply:PrintTranslatedMessage(HUD_PRINTTALK, "exit_hidden_mode")
                 hook.Remove("GUIMousePressed", "GUIMousePressed.HiddenZombie")
             end
@@ -150,17 +191,17 @@ local function ZM_Power_AmbushCreate(ply)
     
     ply:PrintTranslatedMessage(HUD_PRINTTALK, "enter_ambush_mode")
     
-    if not gamemode.Call("OverridePowerHooks", "Ambush") then
+    if not hook.Call("OverridePowerHooks", GAMEMODE, "Ambush") then
         hook.Add("GUIMousePressed", "GUIMousePressed.Ambush", function(mouseCode, aimVector)
             if mouseCode == MOUSE_LEFT then
                 net.Start("zm_create_ambush_point")
                     net.WriteVector(util.QuickTrace(ply:GetShootPos(), aimVector * 10000, LocationTrace).HitPos)
                 net.SendToServer()
                 
-                local tab = gamemode.Call("GenerateClickedQuadTable", GAMEMODE.SelectRingMaterial, 0.3, aimVector, LocationTrace)
+                local tab = hook.Call("GenerateClickedQuadTable", GAMEMODE, GAMEMODE.SelectRingMaterial, 0.3, aimVector, LocationTrace)
                 tab.bGrow = true
                 
-                gamemode.Call("AddQuadDraw", tab)
+                hook.Call("AddQuadDraw", GAMEMODE, tab)
                 hook.Remove("GUIMousePressed", "GUIMousePressed.Ambush")
             end
             
@@ -176,7 +217,7 @@ local function ZM_Power_RallyPoint(ply, cmd, args, argStr)
     end
     
     local TriggerEnt = Entity(args[1])
-    if not gamemode.Call("OverridePowerHooks", "Rally", TriggerEnt) then
+    if not hook.Call("OverridePowerHooks", GAMEMODE, "Rally", TriggerEnt) then
         hook.Add("GUIMousePressed", "GUIMousePressed.Rally", function(mouseCode, aimVector)
             if mouseCode == MOUSE_LEFT then
                 net.Start("zm_placerally")
@@ -189,7 +230,7 @@ local function ZM_Power_RallyPoint(ply, cmd, args, argStr)
                     GAMEMODE.ZombiePanelMenu = nil
                 end
                 
-                gamemode.Call("AddQuadDraw", gamemode.Call("GenerateClickedQuadTable", GAMEMODE.RallyRingMaterial, 0.3, aimVector, LocationTrace))
+                hook.Call("AddQuadDraw", GAMEMODE, hook.Call("GenerateClickedQuadTable", GAMEMODE, GAMEMODE.RallyRingMaterial, 0.3, aimVector, LocationTrace))
                 hook.Remove("GUIMousePressed", "GUIMousePressed.Rally")
             end
             
@@ -205,7 +246,7 @@ local function ZM_Power_Trap(ply, cmd, args, argStr)
     end
     
     local TriggerEnt = Entity(args[1])
-    if not gamemode.Call("OverridePowerHooks", "Trap", TriggerEnt) then
+    if not hook.Call("OverridePowerHooks", GAMEMODE, "Trap", TriggerEnt) then
         hook.Add("GUIMousePressed", "GUIMousePressed.Trap", function(mouseCode, aimVector)
             if mouseCode == MOUSE_LEFT then
                 net.Start("zm_placetrigger")
@@ -240,10 +281,10 @@ local function EndOfLightingMod()
 end
 local function ZM_Power_NightVision(ply)
     if ply:IsZM() then
-        GAMEMODE.nightVision = not GAMEMODE.nightVision
+        GAMEMODE.NightVision = not GAMEMODE.NightVision
         
         if cvars.Number("zm_cl_nightvision_type") == 0 then
-            if GAMEMODE.nightVision then
+            if GAMEMODE.NightVision then
                 hook.Add("PreRender", "PreRender.Fullbright", StartOfLightingMod)
                 hook.Add("PostRender", "PostRender.Fullbright", EndOfLightingMod)
                 hook.Add("PreDrawHUD", "PreDrawHUD.Fullbright", EndOfLightingMod)
@@ -256,8 +297,8 @@ local function ZM_Power_NightVision(ply)
         
         ply:PrintTranslatedMessage(HUD_PRINTTALK, "toggled_nightvision")
         
-        if not GAMEMODE.nightVision then
-            GAMEMODE.nightVisionCur = 0.5
+        if not GAMEMODE.NightVision then
+            GAMEMODE.NightVisionCur = 0.5
         end
     end
 end
@@ -305,6 +346,26 @@ cvars.AddChangeCallback("zm_nohalos", function( convar_name, value_old, value_ne
     GAMEMODE.bDisableHalos = tobool(value_new)
 end)
 
+GM.ZMVisionQuality = CreateClientConVar("zm_vision_quality", "2", true, false, "The quality of the zombie master vision drawing."):GetInt()
+cvars.AddChangeCallback("zm_vision_quality", function( convar_name, value_old, value_new )
+    if not GAMEMODE then return end
+    GAMEMODE.ZMVisionQuality = tonumber(value_new)
+end)
+
+GM.SilhouetteZMVisionOnly = CreateClientConVar("zm_silhouette_zmvision_only", "0", true, false, "Only draw silhouettes when ZM Vision is active."):GetBool()
+cvars.AddChangeCallback("zm_silhouette_zmvision_only", function( convar_name, value_old, value_new )
+    if not GAMEMODE then return end
+    GAMEMODE.SilhouetteZMVisionOnly = tobool(value_new)
+end)
+
+GM.SilhouetteStrength = CreateClientConVar("zm_cl_silhouette_strength", "1", true, false, "How bright the silhouette drawing of zombies will be."):GetFloat()
+GM.SilhouetteNormalColor = {1, 1, 1}
+cvars.AddChangeCallback("zm_cl_silhouette_strength", function( convar_name, value_old, value_new )
+    if not GAMEMODE then return end
+    GAMEMODE.SilhouetteStrength = tonumber(value_new)
+    GAMEMODE:SetupNormalizedSilhouetteColor()
+end)
+
 GM.HaloColor = Color(CreateClientConVar("zm_itemhalo_r", "255", true, false, "Item halo red color min. 0 max. 255"):GetInt(), CreateClientConVar("zm_itemhalo_g", "0", true, false, "Item halo green color min. 0 max. 255"):GetInt(), CreateClientConVar("zm_itemhalo_b", "0", true, false, "Item halo blue color min. 0 max. 255"):GetInt())
 GM.SilhouetteColor = Color(CreateClientConVar("zm_silhouette_r", "255", true, false, "NPC/Player Silhouette red color min. 0 max. 255"):GetInt(), CreateClientConVar("zm_silhouette_g", "0", true, false, "NPC/Player Silhouette green color min. 0 max. 255"):GetInt(), CreateClientConVar("zm_silhouette_b", "0", true, false, "NPC/Player Silhouette blue color min. 0 max. 255"):GetInt())
 
@@ -326,16 +387,19 @@ end)
 cvars.AddChangeCallback("zm_silhouette_r", function( convar_name, value_old, value_new )
     if not GAMEMODE then return end
     GAMEMODE.SilhouetteColor.r = tonumber(value_new)
+    GAMEMODE:SetupNormalizedSilhouetteColor()
 end)
 
 cvars.AddChangeCallback("zm_silhouette_g", function( convar_name, value_old, value_new )
     if not GAMEMODE then return end
     GAMEMODE.SilhouetteColor.g = tonumber(value_new)
+    GAMEMODE:SetupNormalizedSilhouetteColor()
 end)
 
 cvars.AddChangeCallback("zm_silhouette_b", function( convar_name, value_old, value_new )
     if not GAMEMODE then return end
     GAMEMODE.SilhouetteColor.b = tonumber(value_new)
+    GAMEMODE:SetupNormalizedSilhouetteColor()
 end)
 
 GM.HaloWidth = CreateClientConVar("zm_itemhalo_width", "2", true, false, "How thick the outline for the halo will be."):GetInt()

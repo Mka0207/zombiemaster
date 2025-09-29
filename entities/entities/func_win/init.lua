@@ -19,10 +19,10 @@ end
 
 function ENT:InputHumanWin()
     if GAMEMODE:GetRoundEnd() then return end
-    gamemode.Call("TeamVictorious", true, "humans_have_won")
+    hook.Call("TeamVictorious", GAMEMODE, true, "humans_have_won")
 end
 
 function ENT:InputHumanLose()
     if GAMEMODE:GetRoundEnd() then return end
-    gamemode.Call("TeamVictorious", false, "humans_failed_obj")
+    hook.Call("TeamVictorious", GAMEMODE, false, "humans_failed_obj")
 end

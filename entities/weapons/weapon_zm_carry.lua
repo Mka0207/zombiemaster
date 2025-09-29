@@ -36,10 +36,20 @@ SWEP.Undroppable               = true
 function SWEP:Initialize()
     self:SetWeaponHoldType(self.HoldType)
 end
+
+function SWEP:CanPrimaryAttack()
+	if self:GetOwner():IsHolding() then return false end
+    return self:GetNextPrimaryFire() <= CurTime()
+end
+
+function SWEP:CanSecondaryAttack()
+	if self:GetOwner():IsHolding() then return false end
+    return self:GetNextSecondaryFire() <= CurTime()
+end
     
 function SWEP:PrimaryAttack()
     local owner = self:GetOwner()
-    if not IsValid(owner) then return end
+    if not IsValid(owner) or not self:CanPrimaryAttack() then return end
 
     local trace = util.TraceHull({
         start = owner:EyePos(),
@@ -57,7 +67,7 @@ function SWEP:PrimaryAttack()
     self:SetNextSecondaryFire( CurTime() + 0.5 )
     
     if not IsValid(tgt) then return end
-    if not gamemode.Call("GravGunPunt", owner, tgt) then return end
+    if not hook.Call("GravGunPunt", GAMEMODE, owner, tgt) then return end
     if tgt:IsPlayerHolding() then return end
     
     if SERVER then
@@ -70,7 +80,7 @@ function SWEP:PrimaryAttack()
             local ang = Angle(math.Rand(0.2, 1.0), math.Rand(-0.5, 0.5), 0)
             owner:ViewPunch(ang)
             
-            phys:ApplyForceCenter(owner:GetAimVector() * self.PuntForce * 0.5)
+            phys:ApplyForceCenter(owner:GetAimVector() * self.PuntForce)
             phys:ApplyForceOffset(owner:GetAimVector() * 30 * 0.5, position)
             tgt:SetPhysicsAttacker(owner)
         end
@@ -79,7 +89,7 @@ end
 
 function SWEP:SecondaryAttack()
     local owner = self:GetOwner()
-    if not IsValid(owner) then return end
+    if not IsValid(owner) or not self:CanSecondaryAttack() then return end
     
     if self.TP then
         self:SendWeaponAnim( ACT_VM_SECONDARYATTACK )
@@ -117,14 +127,9 @@ function SWEP:SecondaryAttack()
                 local ang = -Angle(math.Rand(0.2, 1.0), math.Rand(-0.5, 0.5), 0)
                 owner:ViewPunch(ang)
                 
-                --PickupObject doesn't seem to work here, he picks it and just instantly drops it
-                --if gamemode.Call("GravGunPickupAllowed", owner, tgt) then
-                    --owner:PickupObject(tgt)
-                --else
-                    phys:ApplyForceCenter(owner:GetAimVector() * -self.PullForce * 0.5)
-                    phys:ApplyForceOffset(owner:GetAimVector() * -30 * 0.5, position)
-                    tgt:SetPhysicsAttacker(owner)
-                --end
+                phys:ApplyForceCenter(-(owner:GetAimVector() * self.PuntForce))
+                phys:ApplyForceOffset(-(owner:GetAimVector() * 30 * 0.5), position)
+                tgt:SetPhysicsAttacker(owner)
             end
         end
     end

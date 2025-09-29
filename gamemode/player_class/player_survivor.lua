@@ -5,48 +5,42 @@ local PLAYER = {}
 
 PLAYER.WalkSpeed             = 170
 PLAYER.RunSpeed              = 170
-PLAYER.CrouchedWalkSpeed     = 0.65
+PLAYER.CrouchedWalkSpeed     = 0.45
+PLAYER.JumpPower			 = 160
 
 PLAYER.AvoidPlayers          = false
 PLAYER.TeammateNoCollide     = false
+PLAYER.OverTheShoulder       = false
 
 function PLAYER:Spawn()
     BaseClass.Spawn(self)
     
+    self.Player:SetSlowWalkSpeed(110)
+    self.Player:SetFlashlightBattery(100, true)
+    self.Player:SetOxygenLevel(100, true)
+    
     self.Player:CrosshairEnable()
-    self.Player:SetMoveType(MOVETYPE_WALK)
-    self.Player:SetCollisionGroup(COLLISION_GROUP_PLAYER)
-    self.Player:SetSolid(SOLID_BBOX)
-    self.Player:SetSolidFlags(0)
-    self.Player:ResetHull()
-    self.Player:UnSpectate()
-    self.Player:SetNoTarget(false)
-    
-    self.Player:DrawShadow(true)
-    self.Player:GodDisable()
-    
     self.Player:StripWeapons()
-    self.Player:SetColor(color_white)
-
-    if self.Player:GetMaterial() ~= "" then
-        self.Player:SetMaterial("")
-    end
     
     if GetConVar("zm_disableplayercollision"):GetBool() then
+        self.Player:SetNoCollideWithTeammates(true)
         self.Player:SetCustomCollisionCheck(true)
+        self.Player:SetAvoidPlayers(false)
+        self.Player:CollisionRulesChanged()
     end
-    
+	
     self.Player:SendLua([[
-        gamemode.Call("RemoveZMPanels")
+        hook.Call("RemoveZMPanels", GAMEMODE)
         
-        local ply = LocalPlayer()
+        local ply = MySelf
         if not IsValid(ply.QuickInfo) then
-            ply.QuickInfo = vgui.Create("CHudQuickInfo")
-            ply.QuickInfo:Center()
-        end  
-        
-        if cvars.Number("zm_hudtype", 0) == HUD_ZMR and not IsValid(GAMEMODE.HumanHealthHUD) then
-            GAMEMODE.HumanHealthHUD = vgui.Create("CHudHealthInfo")
+            timer.Create("CreateQuickInfo", 0, 0, function()
+                ply.QuickInfo = vgui.Create("CHudQuickInfo")
+                if IsValid(ply.QuickInfo) then
+                    ply.QuickInfo:Center()
+                    timer.Remove("CreateQuickInfo")
+                end
+            end)
         end
 
         if cvars.Bool("zm_cl_enablehints") and IsValid(GAMEMODE.ZM_Center_Hints) then
@@ -67,27 +61,48 @@ function PLAYER:Spawn()
                 end)                
             end)
         end
+        
+        if not IsValid(GAMEMODE.FlashlightHUD) then
+            GAMEMODE.FlashlightHUD = vgui.Create("CHudFlashlight")
+        end
+        
+        if not IsValid(GAMEMODE.OxygenHUD) then
+            GAMEMODE.OxygenHUD = vgui.Create("CHudOxygen")
+        end
+        
+        if not IsValid(GAMEMODE.ReloadHUD) then
+            GAMEMODE.ReloadHUD = vgui.Create("CHudReloadTime")
+        end
     ]])
 end
 
 function PLAYER:Loadout()
     self.Player:Give("weapon_zm_fists")
-    self.Player:Give("weapon_zm_carry")
+    //self.Player:Give("weapon_zm_carry")
 end
 
 function PLAYER:Think()
     BaseClass.Think(self)
     
-    if SERVER then
-        GAMEMODE:CheckIfPlayerStuck(self.Player)
+    local pl = self.Player
+    if pl:FlashlightIsOn() and pl:GetFlashlightBattery() > 0 then
+        pl:SetFlashlightBattery(pl:GetFlashlightBattery() - (FrameTime() * GetConVar("zm_sv_flashlightdrainrate"):GetFloat()))
+    elseif not pl:FlashlightIsOn() and pl:GetFlashlightBattery() ~= 100 then
+        pl:SetFlashlightBattery(pl:GetFlashlightBattery() + (FrameTime() * GetConVar("zm_sv_flashlightrechargerate"):GetFloat()))
+    end
+
+    if self.Player:WaterLevel() == 3 then
+        if pl:GetOxygenLevel() > 0 then
+            pl:SetOxygenLevel(pl:GetOxygenLevel() - (FrameTime() * GetConVar("zm_sv_oxygendrainrate"):GetFloat()))
+        end
         
-        if self.Player:WaterLevel() == 3 then
+        if SERVER then
             if self.Player:IsOnFire() then
                 self.Player:Extinguish()
             end
 
-            if self.Player.Drowning then
-                if self.Player.Drowning < CurTime() then
+            if pl:GetOxygenLevel() == 0 then
+                if (self.Player.Drowning or 0) < CurTime() then
                     local dmginfo = DamageInfo()
                     dmginfo:SetDamage(15)
                     dmginfo:SetDamageType(DMG_DROWN)
@@ -97,10 +112,14 @@ function PLAYER:Think()
 
                     self.Player.Drowning = CurTime() + 1
                 end
-            else
-                self.Player.Drowning = CurTime() + 15
             end
-        else
+        end
+    else
+        if pl:GetOxygenLevel() ~= 100 then
+            pl:SetOxygenLevel(pl:GetOxygenLevel() + (FrameTime() * GetConVar("zm_sv_oxygengainrate"):GetFloat()))
+        end
+            
+        if SERVER then
             if self.Player.DrownDamage then
                 local timername = "zm_playerdrown_regen."..self.Player:EntIndex()
                 if timer.Exists(timername) then return end
@@ -130,7 +149,9 @@ function PLAYER:Think()
             
             self.Player.Drowning = nil
         end
-    else
+    end
+    
+    if CLIENT then
         if cvars.Number("zm_hudtype", 0) == HUD_ZMR and not IsValid(GAMEMODE.HumanHealthHUD) then
             GAMEMODE.HumanHealthHUD = vgui.Create("CHudHealthInfo")
         end
@@ -159,14 +180,10 @@ function PLAYER:AllowPickup(ent)
         return false
     end
 
-    --[[
-    if sizeLimit > 0 then
-        local size = ent:OBBMaxs() - ent:OBBMins()
-        if size.x > sizeLimit or size.y > sizeLimit or size.z > sizeLimit then
-            return false
-        end
+    local size = ent:OBBMaxs() - ent:OBBMins()
+    if size.x > CARRY_VOLUME or size.y > CARRY_VOLUME or size.z > CARRY_VOLUME then
+        return false
     end
-    --]]
     
     return true
 end
@@ -189,7 +206,7 @@ function PLAYER:CanPickupWeapon(ent)
         end
         
         local weps = self.Player:GetWeapons()
-        for index, wep in pairs(weps) do
+        for index, wep in ipairs(weps) do
             local slot = wep:GetSlot()
             if slot == 0 then continue end
             
@@ -198,25 +215,10 @@ function PLAYER:CanPickupWeapon(ent)
             end
         end
         
-        if SERVER and (ent:CreatedByMap() or ent.Dropped) then
-            local class = ent:GetClass()
-            
-            self.Player:Give(class)
-            
-            local wep = self.Player:GetWeapon(class)
-            if not wep.IsMelee and wep:GetClass() == class then
-                wep:SetClip1(ent:Clip1())
-                wep:SetClip2(ent:Clip2())
-            end
-            
-            ent:Remove()
-            return false
-        end
-        
         return true
     end
     
-    self.Player.DelayPickup = CurTime() + 0.2
+    self.Player.DelayPickup = CurTime() + 0.1
     
     return false
 end
@@ -224,27 +226,27 @@ end
 function PLAYER:CanPickupItem(item)
     if self.Player.DelayItemPickup and self.Player.DelayItemPickup > CurTime() then 
         self.Player.DelayItemPickup = 0
-        return false 
+        return false
     end
     
     if self.Player:Alive() and item:GetClassName() ~= nil then
         if item.ThrowTime and item.ThrowTime > CurTime() then return false end
         
-        for _, wep in pairs(self.Player:GetWeapons()) do
+        local ammotype = GAMEMODE.AmmoClass[item:GetClassName()] or ""
+        for _, wep in ipairs(self.Player:GetWeapons()) do
             local primaryammo = wep.Primary and wep.Primary.Ammo or ""
             local secondaryammo = wep.Secondary and wep.Secondary.Ammo or ""
-            local ammotype = GAMEMODE.AmmoClass[item:GetClassName()] or ""
             
             if string.lower(primaryammo) == string.lower(ammotype) or string.lower(secondaryammo) == string.lower(ammotype) then
                 local ammovar = GetConVar("zm_maxammo_"..primaryammo or secondaryammo)
                 
                 if ammovar == nil then return end
                 
-                if self.Player:GetAmmoCount(ammotype) < ammovar:GetInt() then
+                local clipdif = wep:GetMaxClip1() - wep:Clip1()
+                if (self.Player:GetAmmoCount(ammotype) - clipdif) < ammovar:GetInt() then
                     if item:IsWeapon() then
                         self.Player:GiveAmmo(GAMEMODE.AmmoCache[ammotype], ammotype, false)
                         item:Remove()
-                        
                         return false
                     end
                     
@@ -256,27 +258,16 @@ function PLAYER:CanPickupItem(item)
         return false
     end
     
-    self.Player.DelayItemPickup = CurTime() + 0.2
+    self.Player.DelayItemPickup = CurTime() + 0.1
     
     return false
 end
 
 function PLAYER:SetupMove(mv, cmd)
-    if IsValid(self.Player.HeldObject) and bit.band(cmd:GetButtons(), IN_ATTACK) ~= 0 then
-        local ent = self.Player.HeldObject
+    if self.Player:IsHolding() then
+        local ent = self.Player.CarryProp
         if ent:IsPlayerHolding() then 
-            DropEntityIfHeld(ent)
-            
-            local ang = Angle(util.SharedRandom("physpax", 0.2, 1.0), util.SharedRandom("physpay", -0.5, 0.5), 0.0)
-            self.Player:ViewPunch(ang)
-            
-            local phys = ent:GetPhysicsObject()
-            if IsValid(phys) then
-                local massFactor = math.Remap(math.Clamp(phys:GetMass(), 0.5, 15), 0.5, 15, 0.5, 4)
-                phys:ApplyForceCenter(self.Player:GetAimVector() * (2000 * massFactor))
-                ent:SetPhysicsAttacker(self.Player)
-            end
-            
+            self.Player.player_pickup:SetupMove(self.Player, ent, mv, cmd)
             return true
         end
     end
@@ -299,7 +290,7 @@ function PLAYER:DrawHUD()
     local wid, hei = ScreenScale(75), ScreenScale(24)
     local x, y = ScrW() * 0.035, ScrH() * 0.9
     
-    draw.RoundedBox(ScreenScale(5), x + 2, y + 2, wid, hei, Color(60, 0, 0, 200))
+    draw.RoundedBox(10, x + 2, y + 2, wid, hei, Color(60, 0, 0, 200))
     
     local health = self.Player:Health()
     if self.Player.CurrentHP ~= health then
@@ -323,16 +314,20 @@ function PLAYER:PreDeath(inflictor, attacker)
     BaseClass.PreDeath(self, inflictor, attacker)
     
     self.Player:SendLua([[
-        if IsValid(LocalPlayer().QuickInfo) then
-            LocalPlayer().QuickInfo:Remove()
+        if IsValid(MySelf.QuickInfo) then
+            MySelf.QuickInfo:Remove()
         end        
         
         if IsValid(GAMEMODE.HumanHealthHUD) then
             GAMEMODE.HumanHealthHUD:Remove()
+        end        
+        
+        if IsValid(GAMEMODE.FlashlightHUD) then
+            GAMEMODE.FlashlightHUD:Remove()
         end
     ]])
     
-    for _, wep in pairs(self.Player:GetWeapons()) do
+    for _, wep in ipairs(self.Player:GetWeapons()) do
         if IsValid(wep) and not wep.Undroppable then
             self.Player:DropWeapon(wep)
         end
@@ -354,7 +349,11 @@ function PLAYER:OnDeath(attacker, dmginfo)
     end
     
     if self.Player:Health() <= -70 and not dmginfo:IsDamageType(DMG_DISSOLVE) then
-        self.Player:Gib(dmginfo)
+        if attacker:IsValid() and attacker:IsAPhysicsProp() then
+            self.Player:CreateRagdoll()
+        else
+            self.Player:Gib(dmginfo)
+        end
     else
         self.Player:CreateRagdoll()
     end
@@ -366,38 +365,43 @@ function PLAYER:OnDeath(attacker, dmginfo)
     
     self.Player:PlayDeathSound()
     
-    local pZM = GAMEMODE:FindZM()
+    /*local pZM = GAMEMODE:FindZM()
     if IsValid(pZM) then
-        local income = math.random(GetConVar("zm_resourcegainperplayerdeathmin"):GetInt(), GetConVar("zm_resourcegainperplayerdeathmax"):GetInt())
-        
-        pZM:AddZMPoints(income)
-        pZM:SetZMPointIncome(pZM:GetZMPointIncome() - 5)
+        pZM:AddFrags(10)
+        pZM:AddZMPoints(GetConVar("zm_kill_reward"):GetInt())
+    end*/
+	
+	for k, v in pairs (GAMEMODE:FindZMs()) do
+		if IsValid(v) then
+			v:AddFrags(10)
+			v:AddZMPoints(GetConVar("zm_kill_reward"):GetInt())
+		end
+	end
+    
+    if self.Player:FlashlightIsOn() then
+        self.Player:Flashlight(false)
+        self.Player:SendLua("MySelf:ClientSetFlashlight(false)")
     end
     
-    self.Player:Flashlight(false)
-    self.Player:RemoveEffects(EF_DIMLIGHT)
-    
+    self.Player:SendLua("MySelf.m_flEnd = CurTime() + 6")
     timer.Simple(0.1, function() 
-        if not IsValid(self.Player) then return end
+        if not IsValid(self.Player) then
+            for _, pl in ipairs(team.GetPlayers(TEAM_SURVIVOR)) do
+                if not pl:Alive() then
+                    hook.Call("PlayerSpawnAsSpectator", GAMEMODE, pl)
+                end
+            end
+            return 
+        end
         hook.Call("PlayerSpawnAsSpectator", GAMEMODE, self.Player) 
     end)
 end
 
 function PLAYER:PostOnDeath(inflictor, attacker)
-    self.Player:Spectate(OBS_MODE_CHASE)
-    self.Player:SpectateEntity(self.Player:GetRagdollEntity())
-    
     self.Player.AllowKeyPress = false
     timer.Simple(3.15, function()
         if not IsValid(self.Player) or self.Player:Team() ~= TEAM_SPECTATOR then return end
-        
         self.Player.AllowKeyPress = true
-        self.Player:Spectate(OBS_MODE_ROAMING)
-        self.Player:SpectateEntity(NULL)
-        
-        if IsValid(self.Player:GetRagdollEntity()) then
-            self.Player:SetPos(self.Player:GetRagdollEntity():WorldSpaceCenter())
-        end
     end)
     
     if player.GetCount() == 1 then return end
@@ -437,23 +441,254 @@ function PLAYER:ShouldTakeDamage(attacker)
         attacker = attacker.PBAttacker
     end
     
-    if IsValid(attacker) then
-        local entteam = attacker.OwnerTeam
-        if attacker:GetClass() == "env_fire" and entteam == self.Player:Team() and attacker:GetOwner() ~= self.Player then
-            return false
-        elseif attacker:GetClass() == "env_delayed_physexplosion" then
-            return false
-        end
-    end
-
-    if attacker:IsPlayer() and attacker ~= self.Player and not attacker.AllowTeamDamage and not self.Player.AllowTeamDamage and attacker:Team() == self.Player:Team() then return false end
-    
-    local entclass = attacker:GetClass()
-    if string.find(entclass, "item_") then
+    local attackerclass = attacker:GetClass()
+    local entteam = attacker.OwnerTeam
+    if attackerclass == "env_fire" and entteam == self.Player:Team() and attacker:GetOwner() ~= self.Player then
+        return false
+    elseif attackerclass == "env_delayed_physexplosion" then
         return false
     end
-
+    
+    if (attacker:IsPlayer() and attacker ~= self.Player and not attacker:IsZM()) or string.sub(attackerclass, 1, 5) == "item_" then
+        return false
+    end
+    
+    local parent = attacker:GetParent()
+    if attacker:GetClass() == "entityflame" and parent:IsValid() and (parent:IsPlayer() and parent ~= self.Player and not parent:IsZM()) then
+        return false
+    end
+    
     return true
+end
+
+local oldGEnts,StandOnNewGround
+
+if SERVER then
+	oldGEnts = {}
+	local MoverEnts = {["func_train"]=true,["func_tracktrain"]=true,["func_movelinear"]=true,["func_rotating"]=true}
+
+	function StandOnNewGround( pl, ent )
+		rawset(oldGEnts,pl,ent)
+		
+		if IsValid(ent) and MoverEnts[ent:GetClass()] then
+			pl:SetNW2Entity("GroundEntity",ent)
+		else
+			pl:SetNW2Entity("GroundEntity",nil)
+		end
+	end
+end
+
+local entmeta = FindMetaTable("Entity")
+local pl_GetGroundEntity = entmeta.GetGroundEntity
+function PLAYER:Move(mv) 
+    if SERVER then
+        local ent = pl_GetGroundEntity(self.Player)
+        if rawget(oldGEnts,self.Player)~=ent then
+            StandOnNewGround(self.Player,ent)
+        end
+    end
+end
+
+local EyePos = EyePos
+local math_max = math.max
+local hook_Run = hook.Run
+
+local M_Vector = FindMetaTable("Vector")
+local V_DistToSqr = M_Vector.DistToSqr
+
+local M_Entity = FindMetaTable("Entity")
+local E_NearestPoint = M_Entity.NearestPoint
+local E_GetTable = M_Entity.GetTable
+
+local undomodelblend = false
+local matWhite = Material("models/debug/debugwhite")
+function PLAYER:PreDrawOther(ply)
+    local ptbl = E_GetTable(ply)
+    local shadowman = false
+    local radius = GAMEMODE.TransparencyRadius
+    if radius > 0 then
+        local eyepos = EyePos()
+        local dist = V_DistToSqr(E_NearestPoint(ply, eyepos), eyepos)
+        if self.Player:Team() == ply:Team() and dist < radius then
+            local blend = math_max((dist / radius) ^ 1.4, 0.04)
+            if ptbl.Transparency ~= blend then
+                hook_Run("PlayerAlphaChanged", ply, blend)
+            end
+            ptbl.Transparency = blend
+            
+			if blend == 0 then
+				ptbl.ShadowMan = true
+				return true
+			end
+            
+            render.SetBlend(blend)
+            if blend < 0.4 then
+                render.ModelMaterialOverride(matWhite)
+                render.SetColorModulation(0.2, 0.2, 0.2)
+                shadowman = true
+            end
+            undomodelblend = true
+        end
+    end
+    
+    ptbl.ShadowMan = shadowman
+    
+    return true
+end
+
+function PLAYER:PostDrawOther(ply)
+    if undomodelblend then
+        render.SetBlend(1)
+        render.ModelMaterialOverride()
+        render.SetColorModulation(1, 1, 1)
+        undomodelblend = false
+    end	
+end
+
+function PLAYER:UseOverTheShoulder()
+	return self.OverTheShoulder and not engine.IsPlayingDemo()
+end
+
+function PLAYER:ShouldDrawLocal()
+    return self:UseOverTheShoulder()
+end
+
+local otscameraangles = Angle()
+local otsdesiredright = 0
+local staggerdir = VectorRand():GetNormalized()
+
+function PLAYER:UseOverTheShoulder()
+	return self.OverTheShoulder and not engine.IsPlayingDemo()
+end
+
+function PLAYER:ToggleOTSCamera()
+	if self.OverTheShoulder then
+		self.OverTheShoulder = false
+	else
+		self.OverTheShoulder = true
+		otsdesiredright = 1
+		otscameraangles = MySelf:EyeAngles()
+	end
+end
+
+function PLAYER:InputMouseApplyOTS(cmd, x, y, ang)
+	otscameraangles.pitch = math.Clamp(math.NormalizeAngle(otscameraangles.pitch + y / 50), -89, 89)
+	otscameraangles.yaw = math.NormalizeAngle(otscameraangles.yaw - x / 50)
+	otscameraangles.roll = ang.roll
+end
+
+function PLAYER:CreateMoveOTS(cmd)
+	local offsetyaw = otscameraangles.yaw - cmd:GetViewAngles().yaw --ply:EyeAngles( ).y
+
+	local corrected = Vector(cmd:GetForwardMove(), cmd:GetSideMove(), 0)
+	local sign = cmd:GetForwardMove() < 0
+	local length = corrected:Length()
+
+	corrected = Angle(0, corrected:Angle().y - offsetyaw, 0):Forward()
+
+	-- Not possible to get a perfect solution, but this is better.
+	cmd:SetForwardMove(math.Clamp(corrected.x * length, sign and -length or 0, length))
+	cmd:SetSideMove(corrected.y * length)
+end
+
+local trace_wall = {mask = MASK_SOLID_BRUSHONLY, mins = Vector(-3, -3, -3), maxs = Vector(3, 3, 3)}
+local trace_crosshair = {mask = MASK_VISIBLE--[[, mins = Vector(-1, -1, -1), maxs = Vector(1, 1, 1)]]}
+local maxdiff = 70
+
+local myteam = 0
+local function IgnoreTeam(ent)
+	return not (ent:IsPlayer() and ent:Team() == myteam)
+end
+function PLAYER:CalcViewOTS(pl, origin, angles, fov, znear, zfar)
+	local camPos = origin - otscameraangles:Forward() * 28 + otsdesiredright * 12 * otscameraangles:Right()
+	local eyepos = pl:EyePos()
+
+	trace_wall.start = eyepos
+	trace_wall.endpos = camPos
+	trace_wall.filter = pl
+	camPos = util.TraceHull(trace_wall).HitPos
+
+	myteam = GetPlayerTeam(pl)
+	trace_crosshair.start = camPos
+	trace_crosshair.endpos = camPos + otscameraangles:Forward() * 32768
+	trace_crosshair.filter = IgnoreTeam
+	local crosshair_tr = util.TraceLine(trace_crosshair)
+	local crosshair_pos = crosshair_tr.HitPos
+	local desired_angles = (crosshair_pos - eyepos):Angle()
+
+	-- Don't face away more than a certain amount of degrees
+	desired_angles.yaw = math.ApproachAngle(otscameraangles.yaw, desired_angles.yaw, maxdiff)
+
+	pl:SetEyeAngles(desired_angles)
+
+	origin:Set(camPos)
+	angles:Set(otscameraangles)
+end
+
+function PLAYER:BindPress(bind, pressed)
+    if bind == "+menu_context" then
+        self:ToggleOTSCamera()
+	end
+end
+
+function PLAYER:InputMouseApply(cmd, x, y, ang)
+	if self:ShouldDrawLocal() then
+		self:InputMouseApplyOTS(cmd, x, y, ang)
+	end
+end
+
+function PLAYER:CreateMove(cmd)
+    BaseClass.CreateMove(self, cmd)
+    
+    if self:ShouldDrawLocal() then
+        self:CreateMoveOTS(cmd)
+    end
+end
+
+local roll = 0
+function PLAYER:CalcView( view )
+    if self:ShouldDrawLocal() then
+        self:CalcViewOTS(self.Player, view.origin, view.angles, view.fov, view.znear, view.zfar)
+    end
+    
+	local targetroll = 0
+
+	if self.Player:WaterLevel() >= 3 then
+		targetroll = targetroll + math.sin(CurTime()) * 7
+	end
+
+	roll = math.Approach(roll, targetroll, math.max(0.25, math.sqrt(math.abs(roll))) * 30 * FrameTime())
+	view.angles.roll = view.angles.roll + roll
+    
+    if self.TauntCam:CalcView(view, self.Player, self.Player:IsPlayingTaunt()) then return true end
+end
+
+local Normal_ColorMod = {
+    ["$pp_colour_contrast"] = 0.95,
+    ["$pp_colour_colour"] = 0.9,
+    ["$pp_colour_addr"] = 0,
+    ["$pp_colour_addg"] = 0,
+    ["$pp_colour_addb"] = 0,
+    ["$pp_colour_brightness"] = -0.025,
+    ["$pp_colour_mulr"] = 0,
+    ["$pp_colour_mulg"] = 0,
+    ["$pp_colour_mulb"] = 0
+}
+local matUnderwater = Material("effects/water_warp01")
+function PLAYER:RenderScreenspaceEffects()
+	if not matUnderwater:IsError() and MySelf:WaterLevel() >= 3 then
+		render.UpdateScreenEffectTexture()
+		render.SetMaterial(matUnderwater)
+		render.DrawScreenQuad()
+	end
+    
+    if not GAMEMODE.ColorModEnabled then return end
+    
+    local healthfract = math.Clamp(self.Player:Health(), 0, self.Player:GetMaxHealth()) / 100
+    Normal_ColorMod["$pp_colour_addr"] = (1 - healthfract) * 0.075
+    Normal_ColorMod["$pp_colour_mulr"] = (1 - healthfract) * 0.25
+    Normal_ColorMod["$pp_colour_brightness"] = -((1 - healthfract) * 0.025) - 0.025
+    DrawColorModify(Normal_ColorMod)
 end
 
 player_manager.RegisterClass("player_survivor", PLAYER, "player_basezm")

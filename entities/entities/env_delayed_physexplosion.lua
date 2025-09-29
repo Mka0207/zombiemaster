@@ -22,7 +22,6 @@ function ENT:Think()
         self:EmitSound("ZMPower.PhysExplode_Boom")
 
         if SERVER then
-            //make players in range drop their stuff, radius is cvar'd
             for _, ent in pairs(ents.FindInSphere(self:LocalToWorld(self:OBBCenter()), GetConVar("zm_physexp_forcedrop_radius"):GetFloat())) do
                 if IsValid(ent) and not ent:IsPlayer() then
                     DropEntityIfHeld(ent)
@@ -30,10 +29,17 @@ function ENT:Think()
             end
         end
 
-        //actual physics explosion
         local entity = ents.Create( "env_physexplosion" )
         if IsValid( entity ) then
-            for _, ent in pairs(ents.FindInSphere(self:LocalToWorld(self:OBBCenter()), ZM_PHYSEXP_RADIUS)) do
+            for _, ent in ipairs(ents.FindInSphere(self:LocalToWorld(self:OBBCenter()), ZM_PHYSEXP_RADIUS)) do
+                if ent:IsWeapon() or ent:GetClass() == "item_zm_ammo" then
+                    local phys = ent:GetPhysicsObject()
+                    if phys:IsValid() then
+                        phys:EnableMotion(true)
+                        phys:Wake()
+                    end
+                end
+                
                 ent:SetPhysicsAttacker(self)
             end
             
@@ -52,7 +58,6 @@ function ENT:Think()
             end)
         end
             
-        //another run for good measure
         local effectdata = EffectData()
         effectdata:SetOrigin(self:GetPos())
         effectdata:SetMagnitude(15)
@@ -64,7 +69,6 @@ function ENT:Think()
         
         self:AddEFlags(EFL_DORMANT)
 
-        //TGB: clean ourselves up, else we stay around til round end
         timer.Simple(10, function()
             if not IsValid(self) then return end
             self:Remove()
@@ -79,7 +83,6 @@ function ENT:CreateDelayEffects(delay)
     
     self:EmitSound("ZMPower.PhysExplode_Buildup")
 
-    //TGB: we want a particle effect instead
     local effectdata = EffectData()
     effectdata:SetOrigin(self:GetPos())
     effectdata:SetMagnitude(1)
@@ -101,7 +104,6 @@ function ENT:CreateDelayEffects(delay)
         ent:SetKeyValue("Magnitude", 2)
         ent:SetKeyValue("TrailLength", 1.5)
 
-        //modify delay to account for delayed dying of sparker
         delay = delay - 2.2
         ent:SetKeyValue("DeathTime", (CurTime() + delay))
 

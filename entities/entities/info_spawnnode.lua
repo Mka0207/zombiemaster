@@ -26,18 +26,22 @@ if SERVER then
         if self.nodeName then
             local pNodeEnt = ents.FindByName(self.nodeName)[1]
             
-            if IsValid(pNodeEnt) then
+            if pNodeEnt and pNodeEnt:IsValid() then
                 return pNodeEnt
             end
+            
+            return NULL
         else
-            return nil
+            return NULL
         end
+        
+        return NULL
     end
 end
 
 if CLIENT then
     function ENT:DrawTranslucent()
-        if not LocalPlayer():IsZM() then return end
+        if not MySelf:IsZM() then return end
         
         render.SuppressEngineLighting(true)
         self:DrawModel()

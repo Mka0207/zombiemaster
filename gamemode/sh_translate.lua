@@ -7,7 +7,7 @@ AddCSLuaFile()
 local string = string
 local string_format = string.format
 local player = player
-local player_GetAll = player.GetAll
+local player_GetAllNoCopy = player.GetAllNoCopy
 local pairs = pairs
 
 translate = {}
@@ -89,7 +89,7 @@ if SERVER then
     end
 
     function PrintTranslatedMessage(printtype, str, ...)
-        for _, pl in pairs(player_GetAll()) do
+        for _, pl in ipairs(player_GetAllNoCopy()) do
             pl:PrintMessage(printtype, translate.ClientFormat(pl, str, ...))
         end
     end

@@ -20,9 +20,10 @@ function meta:HasCustomSchedule(name)
 end
 
 function meta:ForceGo(targetPos, traceDir)
-    self:SetSaveValue("m_vecLastPosition", targetPos)
+    self:SetLastPosition(targetPos)
     self:SetSchedule(SCHED_FORCED_GO_RUN)
     self:SetCondition(COND_RECEIVED_ORDERS)
+    self:SetEnemy(NULL)
     
     GAMEMODE:CallZombieFunction(self, "OnForceGo")
 end
@@ -53,24 +54,23 @@ function meta:ForceSwat(pTarget, breakable)
 end
 
 function meta:FindEnemy()
-    local et = ents.FindInSphere(self:GetPos(), 512)
-    for k, v in ipairs(et) do
-        if not v:IsPlayer() then continue end
-        if not v:Alive() then continue end
-        if not v:IsSurvivor() then continue end
-        
-        self:UpdateEnemy(v)
-        return
+    local eyepos = self:EyePos()
+    local eyedir = self:GetAimVector()
+    local mypos = self:WorldSpaceCenter()
+    for _, pl in ipairs(team.GetPlayers(TEAM_SURVIVOR)) do
+        local pos = pl:WorldSpaceCenter()
+        if mypos:DistToSqr(pos) > 1048576 and self:Visible(pl) then continue end
+        self:UpdateEnemy(pl)
     end
 end
 
 function meta:UpdateEnemy(enemy)
+    if self:IsCurrentSchedule(SCHED_FORCED_GO_RUN) then return end
+    
     if IsValid(enemy) then
         self:SetEnemy(enemy)
-        self:UpdateEnemyMemory(enemy, enemy:GetPos())
-        
-        self:SetSaveValue("m_vecLastPosition", enemy:GetPos())
-        self:SetSchedule(SCHED_FORCED_GO)
+        self:SetTarget(enemy)
+        self:SetSchedule(SCHED_TARGET_CHASE)
         
         if self.PlayVoiceSound then
             self:PlayVoiceSound(self.AlertSounds)

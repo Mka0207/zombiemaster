@@ -21,6 +21,7 @@ if SERVER then
         if not self.EntOwners then self:Remove() return end
         
         for _, npc in pairs(self.EntOwners) do
+            if not IsValid(npc) then continue end
             npc:UpdateEnemy(pl)
         end
         

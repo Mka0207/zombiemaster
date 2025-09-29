@@ -2,8 +2,9 @@ ENT.Type = "point"
 
 local SF_ENVTEXT_ALLPLAYERS = 0x0001
 
-function ENT:Initialize()
+ENT.TriggerOutput = TriggerOutputOverride
 
+function ENT:Initialize()
 end
 
 function ENT:KeyValue(key, value)
@@ -44,7 +45,7 @@ function ENT:AcceptInput(name, caller, activator, arg)
         self:InputAddOutput(arg)
         return true
     elseif string.Left(name, 2) == "on" then
-        self:TriggerOutput(name, activator, args)
+        self:TriggerOutput(name, activator, arg)
     end
 end
 
@@ -74,9 +75,9 @@ function ENT:Display(activator)
         FXTime = self.FXTime,
         Message = self.Message or ""
     }
-    if self:MessageToAll() then
+    if self:MessageToAll() or (IsValid(activator) and not activator:IsPlayer()) then
         self.CurrentDisplayTab = util.PrintMessageBold("GameText_"..self:EntIndex(), messagetab)
-    else
+    elseif IsValid(activator) then
         self.CurrentDisplayTab = util.PrintMessage("GameText_"..self:EntIndex(), activator, messagetab)
     end
 end

@@ -3,6 +3,8 @@ if CLIENT then return end
 DEFINE_BASECLASS("scripted_trigger")
 ENT.Type = "brush"
 
+ENT.TriggerOutput = TriggerOutputOverride
+
 function ENT:Initialize()
     BaseClass.Initialize(self)
     
@@ -49,7 +51,7 @@ function ENT:AcceptInput(name, caller, activator, arg)
         self:InputDisable()
         return true
     elseif string.Left(name, 2) == "on" then
-        self:TriggerOutput(name, activator, args)
+        self:TriggerOutput(name, activator, arg)
     end
 end
 

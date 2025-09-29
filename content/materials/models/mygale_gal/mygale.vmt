@@ -1,0 +1,6 @@
+"VertexLitGeneric"
+{
+	"$baseTexture" 	"models/mygale_gal/mygale"
+//	"$bumpmap"	"models/mygale_gal/mygale-nm"
+	"$model" 1
+}

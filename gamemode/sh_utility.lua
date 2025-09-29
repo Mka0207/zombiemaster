@@ -1,3 +1,8 @@
+local meta = FindMetaTable("Player")
+function EntityIsPlayer(e)
+	return getmetatable(e) == meta
+end
+
 local function GetXPosition(x, width, totalWidth)
     local xPos
     if x == -1 then
@@ -207,6 +212,39 @@ function util.PrintMessageBold(uname, tab)
     return util.PrintMessage(uname, nil, tab)
 end
 
+function CosineInterpolation(y1, y2, mu)
+	local mu2 = (1 - math.cos(mu * math.pi)) / 2
+	return y1 * (1 - mu2) + y2 * mu2
+end
+
+function util.ClipPunchAngleOffset(inv, punch, clip)
+	local final = inv + punch
+
+	for i=1, 3 do
+		if final[i] > clip[i] then
+			final[i] = clip[i]
+		elseif final[i] < -clip[i] then
+			final[i] = -clip[i]
+		end
+
+		inv[i] = final[i] - punch[i]
+	end
+end
+
+function AccessorFuncDT(tab, membername, type, id)
+	local emeta = FindMetaTable("Entity")
+	local setter = emeta["SetDT"..type]
+	local getter = emeta["GetDT"..type]
+
+	tab["Set"..membername] = function(me, val)
+		setter(me, id, val)
+	end
+
+	tab["Get"..membername] = function(me)
+		return getter(me, id)
+	end
+end
+
 if not CLIENT then return end
 
 local function ZoneSelect(x1, y1, x2, y2)
@@ -219,28 +257,32 @@ local function ZoneSelect(x1, y1, x2, y2)
     end
     
     net.Start("zm_boxselect")
-        net.WriteBool(LocalPlayer().bAddSelection)
+        net.WriteBool(MySelf.bAddSelection)
         net.WriteTable(SelectedZombies)
     net.SendToServer()
 end
 function util.BoxSelect(x, y)
     local topleft_x, topleft_y, botright_x, botright_y
 
-    if LocalPlayer().DragX < x then
-        topleft_x = LocalPlayer().DragX
+    if MySelf.DragX < x then
+        topleft_x = MySelf.DragX
         botright_x = x
     else
         topleft_x = x
-        botright_x = LocalPlayer().DragX
+        botright_x = MySelf.DragX
     end
 
-    if LocalPlayer().DragY < y then
-        topleft_y = LocalPlayer().DragY
+    if MySelf.DragY < y then
+        topleft_y = MySelf.DragY
         botright_y = y
     else
         topleft_y = y
-        botright_y = LocalPlayer().DragY
+        botright_y = MySelf.DragY
     end
 
     ZoneSelect(topleft_x, topleft_y, botright_x, botright_y)
+end
+
+function util.NormalizeColor(color)
+	return color.r / 255, color.g / 255, color.b / 255
 end

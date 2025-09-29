@@ -1,4 +1,5 @@
 ENT.Type = "anim"
+ENT.RenderGroup = RENDERGROUP_TRANSLUCENT
 
 function ENT:SetObjectHealth(health)
     self:SetDTFloat(0, health)
@@ -38,4 +39,32 @@ end
 
 function ENT:GetObjectOwner()
     return self:GetDTEntity(0)
+end
+
+function ENT:SetItemClass(class)
+    self:SetDTString(0, class)
+end
+
+function ENT:GetItemClass()
+    return self:GetDTString(0)
+end
+
+function ENT:SetItemCount(count)
+    self:SetDTInt(0, count)
+end
+
+function ENT:GetItemCount()
+    return self:GetDTInt(0)
+end
+
+function ENT:SetLarge(b)
+    self:SetDTBool(0, b)
+end
+
+function ENT:GetLarge()
+    return self:GetDTBool(0)
+end
+
+function ENT:IsAmmo(class)
+    return string.find(class, "item_ammo") or string.find(class, "item_box")
 end

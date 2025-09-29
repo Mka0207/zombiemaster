@@ -1,2 +1,5 @@
 ENT.Type = "anim"
-ENT.RenderGroup = RENDERGROUP_OPAQUE
+
+function ENT:IsAmmo()
+    return true
+end

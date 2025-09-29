@@ -1,0 +1,16 @@
+"VertexlitGeneric"
+{
+	"$basetexture" "models/weapons/zs/cowboyrepeater/cowboyrepeatertangsights"
+	"$bumpmap" "models/weapons/zs/cowboyrepeater/cowboyrepeatertangsights_n"
+	"$normalmapalphaenvmapmask" "1"
+	"$halflambert" "1"
+
+	"$envmap" "env_cubemap"
+	"$envmaptint" "[.02 .02 .02]"
+	"$envmapFresnel" "1"
+
+	"$phong" "1"
+	"$phongboost" ".25"
+	"$phongexponent" 5
+	"$phongfresnelranges"	"[1 2 2]"
+}

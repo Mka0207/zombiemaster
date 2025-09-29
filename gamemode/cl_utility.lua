@@ -82,3 +82,56 @@ end
 function ScaleNumberByResolution(res, num)
     return res * (num / res)
 end
+
+-- Scales the screen based around 1080p but doesn't make things TOO tiny on low resolutions.
+local math_max = math.max
+local scr_h = ScrH
+local last_h = 1080
+local next_h_check = 0
+local fr_n = FrameNumber
+function BetterScreenScale()
+	if next_h_check < fr_n() then
+		next_h_check = fr_n() + 2000
+		last_h = scr_h()
+	end
+
+	return math_max(last_h / 1080, 0.851)
+end
+
+local q = {{},{},{},{}}
+function surface.DrawQuad(x1, y1, x2, y2, x3, y3, x4, y4)
+    q[1].x, q[1].y = x1, y1
+    q[2].x, q[2].y = x2, y2
+    q[3].x, q[3].y = x3, y3
+    q[4].x, q[4].y = x4, y4
+    surface.DrawPoly(q)
+end
+
+local ang2rad = 3.141592653589/180
+local drawquad = surface.DrawQuad
+function surface.DrawArc( _x, _y, r1, r2, aStart, aFinish, steps )
+    aStart, aFinish = aStart*ang2rad, aFinish*ang2rad
+    local step = (( aFinish - aStart ) / steps)
+    local c = steps
+    
+    local a, c1, s1, c2, s2
+    
+    c2, s2 = math.cos(aStart), math.sin(aStart)
+    for _a = 0, steps - 1 do
+        a = _a*step + aStart
+        c1, s1 = c2, s2
+        c2, s2 = math.cos(a+step), math.sin(a+step)
+        
+        drawquad(_x+c1*r1, _y+s1*r1, _x+c1*r2, _y+s1*r2, _x+c2*r2, _y+s2*r2, _x+c2*r1, _y+s2*r1)
+        c = c - 1
+        
+        if c < 0 then break end
+    end
+end
+
+local circleTex = surface.GetTextureID("vgui/white")
+function draw.HollowCircle(cx, cy, radius, thickness, startang, endang, color)
+    surface.SetTexture(circleTex)
+	surface.SetDrawColor(color)
+	surface.DrawArc(cx, cy, radius, radius+thickness, startang, endang, 36)
+end

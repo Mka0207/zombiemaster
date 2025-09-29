@@ -3,14 +3,16 @@ DEFINE_BASECLASS("player_basezm")
 
 local PLAYER = {}
 
+PLAYER.bIgnoreAFK = true
+
 function PLAYER:Spawn()
-    BaseClass.Spawn(self)
+    self.Player:KillSilent()
+    self.Player:Spectate(OBS_MODE_ROAMING)
+    self.Player:SetMoveType(MOVETYPE_NOCLIP)
     
-    self.Player:Flashlight(false)
-    self.Player:RemoveEffects(EF_DIMLIGHT)
-    
-    self.Player:DrawShadow(false)
-    self.Player:GodEnable()
+    self.Player:SendLua([[
+        hook.Call("RemoveZMPanels", GAMEMODE)
+    ]])
 end
 
 function PLAYER:CanSuicide()
@@ -60,7 +62,7 @@ end
 
 function PLAYER:CalcView(view)
     local target = self.Player:GetObserverTarget()
-    if IsValid(target) and target:IsNPC() and self.Player:GetObserverMode() ~= OBS_MODE_ROAMING then
+    if IsValid(target) and (target:IsNPC() or target:IsNextBot()) and self.Player:GetObserverMode() ~= OBS_MODE_ROAMING then
         local tr = {
             start = target:WorldSpaceCenter(),
             endpos = target:WorldSpaceCenter() - (view.angles:Forward() * 150),
@@ -86,6 +88,44 @@ function PLAYER:PostThink()
                 self.Player:SpectateEntity(NULL)
             end
         end
+    end
+end
+
+local lobbyMenu_ColorMod = {
+    ["$pp_colour_contrast"] = 1,
+    ["$pp_colour_colour"] = 0,
+    ["$pp_colour_addr"] = 0,
+    ["$pp_colour_addg"] = 0,
+    ["$pp_colour_addb"] = 0,
+    ["$pp_colour_brightness"] = 0,
+    ["$pp_colour_mulr"] = 0,
+    ["$pp_colour_mulg"] = 0,
+    ["$pp_colour_mulb"] = 0
+}
+local Dead_ColorMod = {
+    ["$pp_colour_contrast"] = 1,
+    ["$pp_colour_colour"] = 0.1,
+    ["$pp_colour_addr"] = 0,
+    ["$pp_colour_addg"] = 0,
+    ["$pp_colour_addb"] = 0,
+    ["$pp_colour_brightness"] = 0,
+    ["$pp_colour_mulr"] = 0,
+    ["$pp_colour_mulg"] = 0,
+    ["$pp_colour_mulb"] = 0
+}
+local spec_overlay = Material("zm_overlay.png", "smooth unlitgeneric nocull")
+function PLAYER:RenderScreenspaceEffects()
+    if not GAMEMODE:GetRoundActive() and IsValid(GAMEMODE.PlayerLobby) then
+        DrawColorModify(lobbyMenu_ColorMod)
+    else
+        if GAMEMODE.ColorModEnabled and self.Player.m_flEnd and self.Player.m_flEnd >= CurTime() then
+            local v = self.Player.m_flEnd - CurTime()
+            Dead_ColorMod["$pp_colour_colour"] = 1 - (math.Clamp(v / 2.5, 0, 1) - 0.1)
+            DrawColorModify(Dead_ColorMod)
+        end
+        
+        render.SetMaterial(spec_overlay)
+        render.DrawScreenQuad()
     end
 end
 

@@ -210,13 +210,13 @@ GM:AddZMPower(CATEGORY_GROUPS, "ZM_Group_List", function()
         self.BaseClass.Think(self)
         
         if GAMEMODE.bUpdateGroups then
-            local groups = gamemode.Call("GetCurrentZombieGroups")
+            local groups = hook.Call("GetCurrentZombieGroups", GAMEMODE)
             if groups then
                 for i, group in pairs(groups) do
                     self:AddChoice("Group "..i)
                 end
             end
-            dropdown:SetText(groups and "Group "..gamemode.Call("GetCurrentZombieGroup") or "None")
+            dropdown:SetText(groups and "Group "..hook.Call("GetCurrentZombieGroup", GAMEMODE) or "None")
             GAMEMODE.bUpdateGroups = false
         end
     end

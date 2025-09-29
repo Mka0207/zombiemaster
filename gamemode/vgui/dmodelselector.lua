@@ -169,14 +169,14 @@ local function ModelSelectionOpen()
     end
 
     local function UpdateFromConvars()
-        local model = LocalPlayer():GetInfo("cl_playermodel")
+        local model = MySelf:GetInfo("cl_playermodel")
         local modelname = player_manager.TranslatePlayerModel(model)
         util.PrecacheModel(modelname)
         mdl:SetModel(modelname)
         mdl.Entity.GetPlayerColor = function() return Vector(GetConVarString("cl_playercolor")) end
         mdl.Entity:SetPos(Vector(-100, 0, -61))
         
-        local skinrep = player_manager.RunClass(LocalPlayer(), "GetReplacmentSkin", string.lower(modelname))
+        local skinrep = player_manager.RunClass(MySelf, "GetReplacmentSkin", string.lower(modelname))
         if skinrep then
             for i, mat in pairs(mdl.Entity:GetMaterials()) do
                 if string.find(mat, "players_sheet") then

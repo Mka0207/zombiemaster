@@ -3,8 +3,8 @@ if CLIENT then return end
 ENT.Type = "brush"
 
 function ENT:Initialize()
-    self:SetTrigger(true)
     self.Entities = {}
+    self:SetTrigger(true)
 end
 
 function ENT:IsTouchedBy(ent)
@@ -12,21 +12,21 @@ function ENT:IsTouchedBy(ent)
 end
 
 function ENT:StartTouch(ent)
-    if not self:PassesTriggerFilters(ent) then return end
+    if not IsValid(ent) or not self:PassesTriggerFilters(ent) or not self.Entities then return end
     table.insert(self.Entities, ent)
     
     self:Input("OnStartTouch", self, ent)
 end
 
 function ENT:Touch(ent)
-    if not self:PassesTriggerFilters(ent) then return end
+    if not IsValid(ent) or not self:PassesTriggerFilters(ent) or not self.Entities then return end
     if not table.HasValue(self.Entities, ent) then table.insert(self.Entities, ent) end
     
     self:Input("OnTouch", self, ent)
 end
 
 function ENT:EndTouch(ent)
-    if not self:IsTouchedBy(ent) then return end
+    if not IsValid(ent) or not self:IsTouchedBy(ent) or not self.Entities then return end
     table.RemoveByValue(self.Entities, ent)
     
     self:Input("OnEndTouch", self, ent)

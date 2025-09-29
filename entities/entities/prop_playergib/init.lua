@@ -22,7 +22,7 @@ function ENT:Initialize()
     end
     self:PhysicsInit(SOLID_VPHYSICS)
     self:SetSolid(SOLID_VPHYSICS)
-    self:SetCollisionGroup(COLLISION_GROUP_DEBRIS_TRIGGER)
+    self:SetCollisionGroup(COLLISION_GROUP_WORLD)
     self:SetTrigger(true)
 
     local phys = self:GetPhysicsObject()

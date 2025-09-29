@@ -35,8 +35,7 @@ function PANEL:Paint(wid, hei)
     local teamid = self:GetTeam()
     
     local col = team.GetColor(teamid)
-    draw.RoundedBoxHollow(3, 0, 0, wid, hei, Color(col.r * 0.65, col.g * 0.65, col.b * 0.65))
-    draw.RoundedBox(2, 2, 2, wid - 4, hei - 4, Color(col.r * 0.45, col.g * 0.45, col.b * 0.45, 200))
+    draw.RoundedBox(4, 0, 0, wid, hei, Color(col.r * 0.5, col.g * 0.5, col.b * 0.5, 200))
     
     return true
 end

@@ -16,15 +16,17 @@ SWEP.HoldType                  = "fist"
 
 SWEP.Primary.Damage            = 10
 SWEP.Primary.Force             = SWEP.Primary.Damage
-SWEP.Primary.Reach             = 45
+SWEP.Primary.Reach             = 60
 SWEP.Primary.HitSound          = "Flesh.ImpactHard"
 SWEP.Primary.HitFleshSound     = "Flesh.ImpactHard"
 SWEP.Primary.MissSound         = "Weapon_Fists_ZM.Melee_Hit"
 SWEP.Primary.Delay             = 0.8
+SWEP.Primary.Hull              = 3
 
 SWEP.Undroppable               = true
 
 function SWEP:Equip(NewOwner)
+    self:RemoveWeaponExtender()
     self.Dropped = false
 end
 

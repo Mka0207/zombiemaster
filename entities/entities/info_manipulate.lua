@@ -43,4 +43,9 @@ function ENT:Trigger(activator)
     end
 
     self.m_iTrapCount = 0
+    
+    local ply = GAMEMODE:FindZM()
+    if ply and ply:IsValid() then
+        ply.m_TriggerCount = (ply.m_TriggerCount or 0) + 1
+    end
 end

@@ -56,9 +56,6 @@ GM:IsMenuOpen()
 Hook. Called after the client has fully loaded or on LUA refresh (Called after InitPostEntity)
 GM:PostClientInit()
 
-Hook. Called when the player changes screen resolution
-GM:OnScreenSizeChange(int new_w, int new_h)
-
 Hook. Called to remove the panels spawned by the ZM
 GM:RemoveZMPanels()
 

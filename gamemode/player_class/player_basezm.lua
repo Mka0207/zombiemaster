@@ -8,6 +8,14 @@ if CLIENT then
     CreateConVar( "cl_playerbodygroups", "0", { FCVAR_ARCHIVE, FCVAR_USERINFO, FCVAR_DONTRECORD }, "The bodygroups to use, if the model has any" )
 end
 
+local spark_packs = false
+
+if VoicePacks then
+	VoiceSetTranslate = ModelIDTable
+	spark_packs = true
+	MsgN("SPARKWERK VOICE PACKS LOADED")
+end
+
 local PLAYER = {}
 
 PLAYER.TauntCam = TauntCamera()
@@ -24,6 +32,8 @@ function PLAYER:Spawn()
     end
     self.Player:SetWeaponColor(col)
     self.Player:Flashlight(false)
+    self.Player.m_flLastActivity = CurTime()
+    self.Player.OldEyeAngles = Angle(0, 0, 0)
 end
 
 local VoiceSetTranslate = {}
@@ -67,10 +77,10 @@ function PLAYER:SetModel()
     if #cl_playermodel == 0 then
         modelname = "models/player/kleiner.mdl"
     end
-    
+
     util.PrecacheModel(modelname)
     self.Player:SetModel(modelname)
-    
+
     local skin = self.Player:GetInfoNum("cl_playerskin", 0)
     self.Player:SetSkin(skin)
 
@@ -80,34 +90,54 @@ function PLAYER:SetModel()
     for k = 0, self.Player:GetNumBodyGroups() - 1 do
         self.Player:SetBodygroup(k, tonumber(groups[ k + 1 ]) or 0)
     end
-    
+
     if string.find(modelname, "male", 1, true) then
         self.Player:SetSkin(skin)
     end
-    
+
+	self.Player:SetupHands()
+	local hands = self.Player:GetHands()
+	
+	local replace_hands = hands and hands:IsValid() and hands:GetModel() == modelname
+	
     if PlayerSkinReplacment[modelname] then
         for i, mat in pairs(self.Player:GetMaterials()) do
             if string.find(mat, "players_sheet") then
                 self.Player:SetSubMaterial(i - 1, PlayerSkinReplacment[modelname])
-                self.Player:SetNW2Int("bSkinReplacmentIndex", i - 1)
-                self.Player:SetNW2String("bSkinReplacmentMat", PlayerSkinReplacment[modelname])
+                self.Player:SetSkinReplacmentIndex(i - 1)
+                self.Player:SetSkinReplacmentMat(PlayerSkinReplacment[modelname])
                 break
             end
         end
+		if replace_hands then
+			for i, mat in pairs(hands:GetMaterials()) do
+				if string.find(mat, "players_sheet") then
+					hands:SetSubMaterial(i - 1, PlayerSkinReplacment[modelname])
+					hands:SetSkinReplacmentIndex(i - 1)
+					hands:SetSkinReplacmentMat(PlayerSkinReplacment[modelname])
+					break
+				end
+			end
+		end
     end
-    
+
     if not GetConVar("zm_disable_playersnds"):GetBool() then
-        if VoiceSetTranslate[modelname] then
+        if spark_packs then
+            local mid = getModelID(self.Player)
+            self.Player.VoiceSet = mid and mid or "None"
+        elseif VoiceSetTranslate[modelname] then
             self.Player.VoiceSet = VoiceSetTranslate[modelname]
         elseif string.find(modelname, "female", 1, true) then
             self.Player.VoiceSet = "female"
         else
             self.Player.VoiceSet = "male"
         end
+    else
+        self.Player.VoiceSet = "None"
     end
 end
 
-function PLAYER:ShouldDrawLocal() 
+function PLAYER:ShouldDrawLocal()
     if self.TauntCam:ShouldDrawLocalPlayer(self.Player, self.Player:IsPlayingTaunt()) then return true end
 end
 
@@ -128,14 +158,8 @@ function PLAYER:GetHandsModel()
 end
 
 function PLAYER:GetNextViewablePlayer(dir)
-	local AllPlayers = {}
-	for _, pl in pairs(player.GetAll()) do
-		if not pl:IsSpectator() then
-			AllPlayers[#AllPlayers + 1] = pl
-		end
-	end
-	
-	local PlayerCount = player.GetCount()
+	local AllPlayers = team.GetPlayers(TEAM_SURVIVOR)
+	local PlayerCount = #AllPlayers
 	local CurrentIndex = -1
 	local RealViewTarget = self.Player:GetObserverTarget()
 	if IsValid(RealViewTarget) then
@@ -146,7 +170,7 @@ function PLAYER:GetNextViewablePlayer(dir)
 			end
 		end
 	end
-	
+
 	local Index = CurrentIndex+dir
 	if Index > PlayerCount then
 		CurrentIndex = 0
@@ -160,19 +184,22 @@ function PLAYER:GetNextViewablePlayer(dir)
 			return ply
 		end
 	end
-	
+
 	return NULL
 end
 
 function PLAYER:OnTakeDamage(attacker, dmginfo)
 end
 
+function PLAYER:PostOnTakeDamage(attacker, dmginfo, took)
+end
+
 function PLAYER:PreDeath(inflictor, attacker)
     self.Player.NextSpawnTime = CurTime() + 2
     self.Player.DeathTime = CurTime()
-    
+
     if IsValid(attacker) and attacker:GetClass() == "trigger_hurt" then attacker = self.Player end
-    
+
     if IsValid(attacker) and attacker:IsVehicle() and IsValid(attacker:GetDriver()) then
         attacker = attacker:GetDriver()
     end
@@ -180,8 +207,8 @@ function PLAYER:PreDeath(inflictor, attacker)
     if not IsValid(inflictor) and IsValid(attacker) then
         inflictor = attacker
     end
-    
-    if IsValid(inflictor) and inflictor == attacker and (inflictor:IsPlayer() or inflictor:IsNPC()) then
+
+    if IsValid(inflictor) and inflictor == attacker and inflictor:IsPlayer() then
         inflictor = inflictor:GetActiveWeapon()
         if not IsValid(inflictor) then inflictor = attacker end
     end
@@ -190,51 +217,40 @@ function PLAYER:PreDeath(inflictor, attacker)
         net.Start("PlayerKilledSelf")
             net.WriteEntity(self.Player)
         net.Broadcast()
-        
-        MsgAll(attacker:Nick() .. " suicided!\n")
     return end
 
     if attacker:IsPlayer() then
         net.Start("PlayerKilledByPlayer")
             net.WriteEntity(self.Player)
-            net.WriteString(IsValid(inflictor) and inflictor:GetClass() or "")
+            net.WriteString(inflictor:IsValid() and inflictor:GetClass() or attacker:GetClass())
             net.WriteEntity(attacker)
         net.Broadcast()
-        
-        MsgAll(attacker:Nick() .. " killed " .. self.Player:Nick() .. " using " .. inflictor:GetClass() .. "\n")
     return end
-    
-    if attacker:IsNPC() or inflictor:IsNPC() then
-        local attackername = ""
-        
-        local pZM = GAMEMODE:FindZM()
+
+    if attacker:IsNPC() or inflictor:IsNPC() or attacker:IsNextBot() or inflictor:IsNextBot() then
+        /*local pZM = GAMEMODE:FindZM()
         if IsValid(pZM) then
             pZM:AddFrags(1)
-        end
-        
-        for _, zombie in pairs(GAMEMODE:GetZombieTable()) do
-            if zombie.Class == attacker:GetClass() then
-                attackername = zombie.Name
-                break
-            end
-        end
-        
+        end*/
+		
+		for k, v in pairs (GAMEMODE:FindZMs()) do
+			if IsValid(v) then
+				v:AddFrags(1)
+			end
+		end
+
         net.Start("PlayerKilledByNPC")
             net.WriteEntity(self.Player)
-            net.WriteString(IsValid(inflictor) and inflictor:GetClass() or "")
-            net.WriteString(attackername)
+            net.WriteEntity(attacker)
+            net.WriteString(inflictor:IsValid() and inflictor:GetClass() or attacker:GetClass())
         net.Broadcast()
-        
-        MsgAll(self.Player:Nick() .. " was killed by " .. attackername .. "\n")
     return end
-    
+
     net.Start("PlayerKilled")
         net.WriteEntity(self.Player)
-        net.WriteString(IsValid(inflictor) and inflictor:GetClass() or "")
-        net.WriteString(IsValid(attacker) and attacker:GetClass() or "")
+        net.WriteString(inflictor:IsValid() and inflictor:GetClass() or attacker:GetClass())
+        net.WriteString(attacker:GetClass())
     net.Broadcast()
-    
-    MsgAll(self.Player:Nick() .. " was killed by " .. attacker:GetClass() .. "\n")
 end
 
 function PLAYER:OnDeath(attacker, dmginfo)
@@ -247,6 +263,21 @@ function PLAYER:OnHurt(attacker, healthremaining, damage)
 end
 
 function PLAYER:Think()
+    if SERVER and GAMEMODE:GetRoundActive() and not self.bIgnoreAFK then
+        if self.Player:GetInternalVariable("m_afButtonLast") ~= self.Player:GetInternalVariable("m_nButtons") or self.Player:EyeAngles() ~= self.Player.OldEyeAngles then
+            self.Player.m_flLastActivity = CurTime()
+            self.Player.OldEyeAngles = self.Player:EyeAngles()
+        end
+
+        if self.Player:IsCloseToAFK() and hook.Call("CanInactivityPunish", GAMEMODE, self.Player) then
+            if self.Player:IsAFK() then
+                hook.Call("PunishInactivity", GAMEMODE, self.Player)
+            elseif ((self.Player.m_flLastActivityWarning or 0) + 1) < CurTime() then
+                self.Player:PrintMessage(HUD_PRINTCENTER, "You are about to get punished for being AFK!")
+                self.Player.m_flLastActivityWarning = CurTime()
+            end
+        end
+    end
 end
 
 function PLAYER:PostThink()
@@ -276,7 +307,9 @@ function PLAYER:PostDraw()
 end
 
 function PLAYER:PreDrawOther(ply)
-    return not ply:IsZM()
+    hook.Run("PlayerAlphaChanged", ply, 1)
+    ply.ShadowMan = false
+    return true
 end
 
 function PLAYER:PostDrawOther(ply)
@@ -311,11 +344,23 @@ end
 function PLAYER:MouseReleased(code, vector)
 end
 
+function PLAYER:MouseDoublePressed(code, vector)
+end
+
 function PLAYER:ShouldTakeDamage(attacker)
     return false
 end
 
 function PLAYER:DrawHUD()
+end
+
+function PLAYER:CreateVGUI()
+end
+
+function PLAYER:InputMouseApply(cmd, x, y, ang)
+end
+
+function PLAYER:RenderScreenspaceEffects()
 end
 
 player_manager.RegisterClass("player_basezm", PLAYER, "player_default")

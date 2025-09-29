@@ -4,8 +4,10 @@ local BackgroundMat = Material("zmr_effects/hud_bg_hp")
 AccessorFunc(PANEL, "m_Tooltip", "Tip")
 
 function PANEL:OnCursorEntered()
+    if not (IsValid(GAMEMODE.ToolPan_Center_Tip) and IsValid(GAMEMODE.ToolLab_Center_Tip)) then return end
+    
     GAMEMODE.DrawingPowerTooltip = true
-    GAMEMODE.ToolPan_Center_Tip:SetVisible(true)
+    GAMEMODE.ToolPan_Center_Tip:AlphaTo(255, 0.2)
 
     GAMEMODE.ToolLab_Center_Tip:SetText(self:GetTip())
     GAMEMODE.ToolLab_Center_Tip:SizeToContents()
@@ -20,7 +22,7 @@ end
 
 function PANEL:OnCursorExited()
     GAMEMODE.DrawingPowerTooltip = false
-    GAMEMODE.ToolPan_Center_Tip:SetVisible(false)
+    GAMEMODE.ToolPan_Center_Tip:AlphaTo(0, 0.2)
 end
 
 function PANEL:Think()

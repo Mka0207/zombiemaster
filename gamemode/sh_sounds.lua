@@ -2,58 +2,59 @@ sound.Add( {
     name = "ZMPower.PhysExplode_Buildup",
     channel = CHAN_STATIC,
     volume = 1.0,
-    level = 100,
-    sound = "powers/explosion_3.wav"
+    level = 130,
+    sound = "^powers/explosion_3.wav"
 } )
 
 sound.Add( {
     name = "ZMPower.PhysExplode_Boom",
     channel = CHAN_STATIC,
     volume = 1.0,
-    level = 100,
-    sound = "powers/explosion_3_boom.wav"
+    level = 140,
+    sound = "^powers/explosion_3_boom.wav"
 } )
 
 sound.Add( {
     name = "Weapon_Shotgun_ZM.Empty",
     channel = CHAN_WEAPON,
     volume = 0.7,
-    level = 75,
+    level = 40,
     pitch = { 95, 100 },
-    sound = "weapons/shotgun_zm/shotgun_empty_zm.wav"
+    sound = ")weapons/shotgun_zm/shotgun_empty_zm.wav"
 } )
 
 sound.Add( {
     name = "Weapon_Shotgun_ZM.Reload",
-    channel = CHAN_WEAPON,
+    channel = CHAN_ITEM,
     volume = 0.7,
     level = 75,
-    sound = { "weapons/shotgun_zm/shotgun_reload1_zm.wav", "weapons/shotgun_zm/shotgun_reload2_zm.wav", "weapons/shotgun_zm/shotgun_reload3_zm.wav" }
+    sound = { ")weapons/shotgun_zm/shotgun_reload1_zm.wav", ")weapons/shotgun_zm/shotgun_reload2_zm.wav", ")weapons/shotgun_zm/shotgun_reload3_zm.wav" }
 } )
 
 sound.Add( {
     name = "Weapon_Shotgun_ZM.Special1",
-    channel = CHAN_WEAPON,
+    channel = CHAN_ITEM,
     volume = 0.7,
     level = 75,
-    sound = "weapons/shotgun_zm/shotgun_cock_zm.wav"
+    sound = ")weapons/shotgun_zm/shotgun_cock_zm.wav"
 } )
 
 sound.Add( {
     name = "Weapon_Shotgun_ZM.Single",
     channel = CHAN_WEAPON,
     volume = 1.0,
-    level = 95,
-    sound = {"weapons/shotgun_zm/shotgun_fire6_zm.wav", "weapons/shotgun_zm/shotgun_fire7_zm.wav"}
+    level = 140,
+    pitch = { 98, 101 },
+    sound = "^weapons/shotgun_zm/shotgun_fire7_zm_dist2.wav"
 } )
 
 sound.Add( {
     name = "Weapon_Shotgun_ZM.Double",
     channel = CHAN_WEAPON,
     volume = 1.0,
-    level = 95,
+    level = 140,
     pitch = { 90, 95 },
-    sound = {"weapons/shotgun_zm/shotgun_fire6_zm.wav", "weapons/shotgun_zm/shotgun_fire7_zm.wav"}
+    sound = "^weapons/shotgun_zm/shotgun_dbl_fire7_zm_dist.wav"
 } )
 
 sound.Add( {
@@ -61,7 +62,7 @@ sound.Add( {
     channel = CHAN_ITEM,
     volume = 0.7,
     level = 75,
-    sound = { "weapons/shotgun_zm/shotgun_reload1_zm.wav", "weapons/shotgun_zm/shotgun_reload2_zm.wav", "weapons/shotgun_zm/shotgun_reload3_zm.wav" }
+    sound = { ")weapons/shotgun_zm/shotgun_reload1_zm.wav", ")weapons/shotgun_zm/shotgun_reload2_zm.wav", ")weapons/shotgun_zm/shotgun_reload3_zm.wav" }
 } )
 
 sound.Add( {
@@ -77,9 +78,9 @@ sound.Add( {
     name = "Weapon_Rifle_ZM.Empty",
     channel = CHAN_WEAPON,
     volume = 0.7,
-    level = 75,
+    level = 40,
     pitch = { 95, 100 },
-    sound = "weapons/rifle_zm/zm_rifle_empty.wav"
+    sound = ")weapons/rifle_zm/zm_rifle_empty.wav"
 } )
 
 sound.Add( {
@@ -87,7 +88,7 @@ sound.Add( {
     channel = CHAN_WEAPON,
     volume = 0.6,
     level = 75,
-    sound = { "weapons/rifle_zm/zm_rifle_reload1.wav", "weapons/rifle_zm/zm_rifle_reload1.wav", "weapons/rifle_zm/zm_rifle_reload2.wav" }
+    sound = { ")weapons/rifle_zm/zm_rifle_reload1.wav", ")weapons/rifle_zm/zm_rifle_reload1.wav", ")weapons/rifle_zm/zm_rifle_reload2.wav" }
 } )
 
 sound.Add( {
@@ -95,7 +96,7 @@ sound.Add( {
     channel = CHAN_ITEM,
     volume = 1.0,
     level = 75,
-    sound = "weapons/rifle_zm/zm_rifle_lever.wav"
+    sound = ")weapons/rifle_zm/zm_rifle_lever.wav"
 } )
 
 sound.Add( {
@@ -104,7 +105,7 @@ sound.Add( {
     volume = 0.75,
     level = 95,
     pitch = { 98, 101 },
-    sound = "weapons/rifle_zm/zm_rifle_fire2.wav"
+    sound = "^weapons/rifle_zm/zm_rifle_fire2.wav"
 } )
 
 sound.Add( {
@@ -112,132 +113,116 @@ sound.Add( {
     channel = CHAN_ITEM,
     volume = 0.7,
     level = 75,
-    sound = { "weapons/rifle_zm/zm_rifle_reload1.wav", "weapons/rifle_zm/zm_rifle_reload2.wav" }
+    sound = { ")weapons/rifle_zm/zm_rifle_reload1.wav", ")weapons/rifle_zm/zm_rifle_reload2.wav" }
 } )
 
 sound.Add( {
     name = "Weapon_Rifle_ZM.NPC_Single",
     channel = CHAN_WEAPON,
     volume = 0.5,
-    level = 95,
+    level = 140,
     pitch = { 98, 101 },
-    sound = "weapons/rifle_zm/zm_rifle_fire2.wav"
-} )
-
-sound.Add( {
-    name = "Weapon_SMG_ZM.Reload1",
-    channel = CHAN_WEAPON,
-    volume = 0.6,
-    level = 75,
-    sound = "weapons/smg_zm/smg_reload1.wav"
-} )
-
-sound.Add( {
-    name = "Weapon_SMG_ZM.Reload2",
-    channel = CHAN_WEAPON,
-    volume = 0.6,
-    level = 75,
-    sound = "weapons/smg_zm/smg_reload2.wav"
-} )
-
-sound.Add( {
-    name = "Weapon_SMG_ZM.Reload3",
-    channel = CHAN_WEAPON,
-    volume = 0.6,
-    level = 75,
-    sound = "weapons/smg_zm/smg_reload3.wav"
-} )
-
-sound.Add( {
-    name = "Weapon_SMG_ZM.Empty",
-    channel = CHAN_WEAPON,
-    volume = 0.7,
-    level = 75,
-    sound = "weapons/pistol/pistol_empty.wav"
+    sound = "^weapons/rifle_zm/zm_rifle_fire2.wav"
 } )
 
 sound.Add( {
     name = "Weapon_SMG_ZM.Single",
     channel = CHAN_WEAPON,
     volume = 0.55,
-    level = 95,
+    level = 140,
     pitch = { 95, 105 },
-    sound = "weapons/smg_zm/smg_fire.wav"
+    sound = "^weapons/smg_zm/smg_fire_distancefade.wav"
 } )
 
 sound.Add( {
     name = "Weapon_SMG_ZM.Double",
     channel = CHAN_WEAPON,
     volume = 0.61,
-    level = 95,
-    sound = "weapons/smg_zm/smg_fire.wav"
+    level = 140,
+    sound = "^weapons/smg_zm/smg_fire_distancefade.wav"
 } )
 
 sound.Add( {
     name = "Weapon_SMG_ZM.NPC_Single",
     channel = CHAN_WEAPON,
     volume = 0.8,
-    level = 95,
-    sound = "weapons/smg_zm/smg_fire.wav"
+    level = 140,
+    sound = "^weapons/smg_zm/smg_fire_distancefade.wav"
 } )
 
 sound.Add( {
     name = "Weapon_SMG_ZM.Burst",
     channel = CHAN_WEAPON,
     volume = 0.7,
-    level = 95,
+    level = 140,
     pitch = { 98, 105 },
-    sound = "weapons/smg_zm/smg_fire.wav"
+    sound = "^weapons/smg_zm/smg_fire_distancefade.wav"
 } )
 
 sound.Add( {
     name = "Weapon_SMG_ZM.NPC_Reload",
-    channel = CHAN_WEAPON,
+    channel = CHAN_ITEM,
     volume = 0.7,
     level = 75,
-    sound = "weapons/smg1/smg1_reload.wav"
+    sound = ")weapons/smg1/smg1_reload.wav"
 } )
 
 sound.Add( {
-    name = "Weapon_pistol_zm.Reload",
+    name = "Weapon_Pistol_ZM.Reload",
     channel = CHAN_ITEM,
     volume = 0.8,
     level = 75,
-    sound = "weapons/pistol_zm/pistol_zm_reload1.wav"
+    sound = ")weapons/pistol_zm/pistol_zm_reload1.wav"
 } )
 
 sound.Add( {
-    name = "Weapon_pistol_zm.NPC_Reload",
+    name = "Weapon_Pistol_ZM.Reload2",
     channel = CHAN_ITEM,
     volume = 0.8,
     level = 75,
-    sound = "weapons/smg1/smg1_reload.wav"
+    sound = ")weapons/pistol_zm/pistol_zm_reload2.wav"
 } )
 
 sound.Add( {
-    name = "Weapon_pistol_zm.Empty",
-    channel = CHAN_WEAPON,
+    name = "Weapon_Pistol_ZM.Reload3",
+    channel = CHAN_ITEM,
     volume = 0.8,
     level = 75,
-    sound = "weapons/pistol_zm/pistol_zm_empty.wav"
+    sound = ")weapons/pistol_zm/pistol_zm_reload3.wav"
 } )
 
 sound.Add( {
-    name = "Weapon_pistol_zm.Single",
+    name = "Weapon_Pistol_ZM.NPC_Reload",
+    channel = CHAN_ITEM,
+    volume = 0.8,
+    level = 75,
+    sound = ")weapons/smg1/smg1_reload.wav"
+} )
+
+sound.Add( {
+    name = "Weapon_Pistol_ZM.Empty",
     channel = CHAN_WEAPON,
     volume = 0.8,
-    level = 95,
+    level = 40,
+    sound = ")weapons/pistol_zm/pistol_zm_empty.wav"
+} )
+
+sound.Add( {
+    name = "Weapon_Pistol_ZM.Single",
+    channel = CHAN_WEAPON,
+    volume = 0.8,
+    level = 140,
     pitch = { 98, 101 },
-    sound = { "weapons/pistol_zm/pistol_zm_fire1.wav", "weapons/pistol_zm/pistol_zm_fire2.wav" }
+    sound = { "^weapons/pistol_zm/pistol_zm_fire1_dist.wav", "^weapons/pistol_zm/pistol_zm_fire2_dist.wav" }
 } )
 
 sound.Add( {
-    name = "Weapon_pistol_zm.NPC_Single",
+    name = "Weapon_Pistol_ZM.NPC_Single",
     channel = CHAN_WEAPON,
     volume = 0.9,
-    level = 95,
+    level = 140,
     pitch = { 98, 120 },
-    sound = { "weapons/pistol_zm/pistol_zm_fire1.wav", "weapons/pistol_zm/pistol_zm_fire2.wav" }
+    sound = { ")weapons/pistol_zm/pistol_zm_fire1.wav", ")weapons/pistol_zm/pistol_zm_fire2.wav" }
 } )
 
 sound.Add( {
@@ -246,7 +231,7 @@ sound.Add( {
     volume = 0.6,
     level = 105,
     pitch = { 95, 100 },
-    sound = "weapons/fists_zm/swing1.wav"
+    sound = ")weapons/fists_zm/swing1.wav"
 } )
 
 sound.Add( {
@@ -255,7 +240,7 @@ sound.Add( {
     volume = 0.65,
     level = 105,
     pitch = { 95, 100 },
-    sound = "weapons/sledge_zm/sledge_swing.wav"
+    sound = ")weapons/sledge_zm/sledge_swing.wav"
 } )
 
 sound.Add( {
@@ -263,8 +248,8 @@ sound.Add( {
     channel = CHAN_WEAPON,
     volume = 0.75,
     level = 105,
-    pitch = { 95, 100 },
-    sound = "weapons/sledge_zm/sledge_swing.wav"
+    pitch = { 40, 45 },
+    sound = ")weapons/iceaxe/iceaxe_swing1.wav"
 } )
 
 sound.Add( {
@@ -273,7 +258,24 @@ sound.Add( {
     volume = 0.75,
     level = 105,
     pitch = { 95, 100 },
-    sound = "weapons/sledge_zm/sledge_swingalt.wav"
+    sound = ")weapons/sledge_zm/sledge_swingalt.wav"
+} )
+
+sound.Add( {
+    name = "Weapon_Revolver_ZM.Single",
+    channel = CHAN_WEAPON,
+    volume = 0.93,
+    level = 140,
+    pitch = { 88, 93 },
+    sound = ")weapons/revolver_zm/revolver_fire.wav"
+} )
+
+sound.Add( {
+    name = "Weapon_Revolver_ZM.Reload",
+    channel = CHAN_WEAPON,
+    volume = 0.7,
+    level = 75,
+    sound = ")weapons/revolver_zm/revolver_reload.wav"
 } )
 
 -- Replacing engine source scripts
@@ -666,3 +668,76 @@ sound.Add( {
     sound = "npc/stalker/go_alert2a.wav"
 } )
 
+sound.Add( {
+    name = "NPC_HeadCrab.Burning",
+    channel = CHAN_STATIC,
+    volume = 0.45,
+    level = 75,
+    pitch = 100,
+    sound = "npc/spider/headcrab_burning_loop2.wav"
+} )
+
+sound.Add( {
+    name = "NPC_HeadCrab.Alert",
+    channel = CHAN_VOICE,
+    volume = 1.0,
+    level = 60,
+    pitch = 100,
+    sound = {"npc/spider/alert1.wav", "npc/spider/alert2.wav"}
+} )
+
+sound.Add( {
+    name = "NPC_HeadCrab.Pain",
+    channel = CHAN_VOICE,
+    volume = 1.0,
+    level = 60,
+    pitch = 100,
+    sound = {"npc/spider/pain1.wav", "npc/spider/pain2.wav", "npc/spider/pain3.wav"}
+} )
+
+sound.Add( {
+    name = "NPC_HeadCrab.Die",
+    channel = CHAN_VOICE,
+    volume = 1.0,
+    level = 60,
+    pitch = 100,
+    sound = {"npc/spider/die1.wav", "npc/spider/die2.wav"}
+} )
+
+sound.Add( {
+    name = "NPC_HeadCrab.Bite",
+    channel = CHAN_WEAPON,
+    volume = 1.0,
+    level = 60,
+    pitch = 100,
+    sound = "npc/spider/headbite.wav"
+} )
+
+sound.Add( {
+    name = "NPC_HeadCrab.Attack",
+    channel = CHAN_VOICE,
+    volume = 1.0,
+    level = 60,
+    pitch = 100,
+    sound = {"npc/spider/attack1.wav", "npc/spider/attack2.wav", "npc/spider/attack3.wav"}
+} )
+
+-- Gore
+
+sound.Add( {
+    name = "Gore.Strain",
+    channel = CHAN_AUTO,
+    volume = 1.0,
+    level = 70,
+    pitch = {135, 145},
+    sound = {"physics/wood/wood_strain1.wav", "physics/wood/wood_strain2.wav", "physics/wood/wood_strain3.wav"}
+} )
+
+sound.Add( {
+    name = "Gore.Break",
+    channel = CHAN_AUTO,
+    volume = 0.8,
+    level = 70,
+    pitch = {115, 125},
+    sound = {"physics/body/body_medium_break2.wav", "physics/body/body_medium_break3.wav", "physics/body/body_medium_break4.wav"}
+} )

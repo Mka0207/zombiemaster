@@ -3,6 +3,8 @@ AddCSLuaFile("shared.lua")
 
 include("shared.lua")
 
+ENT.TriggerOutput = TriggerOutputOverride
+
 function ENT:KeyValue( key, value )
     key = string.lower(key)
     if key == "cost" then
@@ -40,7 +42,7 @@ function ENT:AcceptInput(name, caller, activator, arg)
         self:InputUnhide()
         return true
     elseif string.Left(name, 2) == "on" then
-        self:TriggerOutput(name, activator, args)
+        self:TriggerOutput(name, activator, arg)
     end
 end
 

@@ -99,7 +99,7 @@ function PANEL:Init()
     self.removeOne.DontDisabled = true
     self.removeOne.Paint = PaintButton
     self.removeOne.DoClick = function()
-        if LocalPlayer():IsZM() then
+        if MySelf:IsZM() then
             if self.queue.PanelList and #self.queue.PanelList > 0 then
                 net.Start("zm_rqueue")
                     net.WriteEntity(self:GetCurrent())
@@ -120,7 +120,7 @@ function PANEL:Init()
     self.clearQueue.DontDisabled = true
     self.clearQueue.Paint = PaintButton
     self.clearQueue.DoClick = function()
-        if LocalPlayer():IsZM() then
+        if MySelf:IsZM() then
             if self.queue.PanelList and #self.queue.PanelList > 0 then
                 for _, img in pairs(self.queue.PanelList) do
                     img:Remove()
@@ -142,7 +142,7 @@ function PANEL:Init()
     self.placeRally:SetTextColor(color_white)
     self.placeRally.Paint = PaintButton
     self.placeRally.DoClick = function()
-        if LocalPlayer():IsZM() then
+        if MySelf:IsZM() then
             RunConsoleCommand("zm_power_rallypoint", self:GetCurrent():EntIndex())
             self:SetVisible(false)
             
@@ -158,7 +158,7 @@ function PANEL:Init()
     self.closebut:SetTextColor(color_white)
     self.closebut.Paint = PaintButton
     self.closebut.DoClick = function()
-        if LocalPlayer():IsZM() then
+        if MySelf:IsZM() then
             self:Close()
         end
     end
@@ -241,7 +241,7 @@ function PANEL:Populate()
         
         buttonFive:MoveRightOf(buttonSingle, 5)
         
-        if not gamemode.Call("CanSpawnZombie", data.Flag or 0, self:GetZombieflags()) then
+        if not hook.Call("CanSpawnZombie", GAMEMODE, data.Flag or 0, self:GetZombieflags()) then
             buttonSingle:SetDisabled(true)
             buttonFive:SetDisabled(true)
         end
@@ -255,7 +255,7 @@ end
 
 function PANEL:AddQueue(type)
     local data = GAMEMODE:GetZombieData(type)
-    local smallImage = "VGUI/zombies/queue_"..string.lower(data.Name)
+    local smallImage = data.IconSmall
     
     local image = vgui.Create("DImage")
     image:SetImage(smallImage)
@@ -296,8 +296,14 @@ function PANEL:Close()
 end
 
 function PANEL:Think()
+    if IsValid(self:GetCurrent()) and not self:GetCurrent():GetActive() and self.queue.PanelList and #self.queue.PanelList > 0 then
+        for _, img in pairs(self.queue.PanelList) do
+            img:Remove()
+        end
+    end
+
     if self:IsVisible() then
-        LocalPlayer().bIsDragging = false
+        MySelf.bIsDragging = false
     end
 end
 

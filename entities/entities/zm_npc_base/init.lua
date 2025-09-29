@@ -106,7 +106,7 @@ function ENT:GetRelationship(ent)
 end
 
 function ENT:OnDeath(killer, inflictor)
-    gamemode.Call("OnNPCKilled", self, killer, inflictor)
+    hook.Call("OnNPCKilled", GAMEMODE, self, killer, inflictor)
     self:PlayVoiceSound(self.DeathSounds)
     
     self:SetSchedule(SCHED_FALL_TO_GROUND)

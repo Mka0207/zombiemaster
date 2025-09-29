@@ -1,11 +1,15 @@
 CreateConVar("zm_physexp_forcedrop_radius", "128", FCVAR_NOTIFY, "Radius in which players are forced to drop what they carry so that the physexp can affect the objects.")
 CreateConVar("zm_loadout_disable", "0", FCVAR_NOTIFY, "If set to 1, any info_loadout entity will not hand out weapons. Not recommended unless you're intentionally messing with game balance and playing on maps that support this move.")
 CreateConVar("zm_disable_playersnds", "0", FCVAR_NOTIFY + FCVAR_ARCHIVE, "Disable the pain and death sounds of players.")
+CreateConVar("zm_force_nextbots", "0", FCVAR_NOTIFY + FCVAR_ARCHIVE, "Force to use the NextBots, when the gamemode was set to false on gamemode loaded.")
 
-CreateConVar("zm_disableplayercollision", "0", FCVAR_NOTIFY, "Disables player to player collisions.")
 cvars.AddChangeCallback("zm_disableplayercollision", function(convar_name, value_old, value_new)
+    local b = tobool(value_new)
     for _, ply in pairs(team.GetPlayers(TEAM_SURVIVOR)) do
-        ply:SetCustomCollisionCheck(true)
+        ply:SetNoCollideWithTeammates(b)
+        ply:SetCustomCollisionCheck(b)
+        ply:SetAvoidPlayers(not b)
+        ply:CollisionRulesChanged()
     end
 end)
 
@@ -22,10 +26,10 @@ end)
 concommand.Add("zm_debug_spawn_zombie", function(ply, cmd, args)
     if not IsValid(ply) then return end
     if not ply:IsSuperAdmin() then return end
-    
+
     local tr = util.TraceLine(util.GetPlayerTrace(ply))
     if not tr.Hit then return end
-    
+
     local class = args[1] or "npc_zombie"
     GAMEMODE:SpawnZombie(nil, class, tr.HitPos + Vector(0, 0, 25), Angle(0, 0, 0), 0, false)
 end)
@@ -33,13 +37,13 @@ end)
 concommand.Add("zm_debug_testspottrace", function(ply, cmd, args)
     if not IsValid(ply) then return end
     if not ply:IsSuperAdmin() then return end
-    
+
     local tr = util.TraceLine(util.GetPlayerTrace(ply))
     if not tr.Hit then return end
-    
+
     local vecHeadTarget = tr.HitPos
     vecHeadTarget.z = vecHeadTarget.z + 64
-    
+
     for _, pl in pairs(team.GetPlayers(TEAM_SURVIVOR)) do
         local tr = util.TraceLine({
             start = tr.HitPos,
@@ -73,11 +77,18 @@ end)
 CreateConVar("zm_banshee_limit", "-1", { FCVAR_ARCHIVE, FCVAR_NOTIFY }, "Sets maximum number of banshees per survivor that the ZM is allowed to have active at once. Set to 0 or lower to remove the cap. Disabled by default since new population system was introduced that in practice includes a banshee limit.")
 CreateConVar("zm_trap_triggerrange", "96", FCVAR_NONE, "The range trap trigger points have.")
 CreateConVar("zm_spawndelay", "0.75", FCVAR_NOTIFY, "Delay between creation of zombies at zombiespawn.")
-CreateConVar("zm_incometime", "8", FCVAR_NOTIFY, "Amount of time in seconds the Zombie Master gains resources.")
-CreateConVar("zm_resourcegainperplayerdeathmin", "50", FCVAR_NOTIFY, "Min amount of resources the Zombie Master gains per player death.")
-CreateConVar("zm_resourcegainperplayerdeathmax", "100", FCVAR_NOTIFY, "Max amount of resources the Zombie Master gains per player death.")
+CreateConVar("zm_resource_refill_rate", "5", FCVAR_NOTIFY, "Seconds between resource refills.")
+CreateConVar("zm_resource_refill_min", "25", FCVAR_NOTIFY, "Minimum resource refill amount.")
+CreateConVar("zm_resource_refill_max", "75", FCVAR_NOTIFY, "Maximum resource refill amount.")
+CreateConVar("zm_kill_reward", "150", FCVAR_NOTIFY, "How much resources the ZM gets for killing a player.")
+CreateConVar("zm_resource_limit", "4000", FCVAR_NOTIFY, "The max number of resources the ZM can hoard.")
+CreateConVar("zm_initial_resources", "100", FCVAR_NOTIFY, "How much resources does the ZM start with.")
 --CreateConVar("zm_notimeslowonwin", "0", FCVAR_NOTIFY, "Disables time slowing down when someone wins a game.")
-CreateConVar("zm_postroundstarttimer", "30", FCVAR_NOTIFY, "How many seconds after the game starts that first joiners will not be human.")
+CreateConVar("zm_postroundstarttimer", "60", FCVAR_NOTIFY, "How many seconds after the game starts that first joiners will not be human.")
+CreateConVar("zm_sv_antiafk", "90", FCVAR_NOTIFY + FCVAR_ARCHIVE, "If the player is AFK for this many seconds, put them into spectator mode. 0 = disable")
+CreateConVar("zm_sv_antiafk_replacezm", "1", FCVAR_NOTIFY + FCVAR_ARCHIVE, "If the player afking is the only ZM, replace them.")
+CreateConVar("zm_sv_antiafk_punish", "1", FCVAR_NOTIFY + FCVAR_ARCHIVE, "0 = Don't do anything. 1 = Transfer to spectator team, 2 = Kick.")
+CreateConVar("zm_multiple_zms_per_players", "22", FCVAR_NOTIFY + FCVAR_ARCHIVE, "Game will have an extra Zombie Master(s) when this server has this amount of players. It stacks too.")
 
 local function ZM_Power_PhysExplode_SV(len, ply)
     if not IsValid(ply) or not ply:IsZM() then return end
@@ -88,14 +99,14 @@ local function ZM_Power_PhysExplode_SV(len, ply)
         ply:PrintTranslatedMessage(HUD_PRINTTALK, "invalid_surface_for_explosion")
         return
     end
-    
+
     local location = tr.HitPos
-    
+
     if not ply:CanAfford(GetConVar("zm_physexp_cost"):GetInt()) then
         ply:PrintTranslatedMessage(HUD_PRINTTALK, "not_enough_resources")
         return
     end
-    
+
     ply:SetZMPoints(ply:GetZMPoints() - GetConVar("zm_physexp_cost"):GetInt())
 
     local ent = ents.Create("env_delayed_physexplosion")
@@ -110,28 +121,37 @@ end
 net.Receive("zm_place_physexplode", ZM_Power_PhysExplode_SV)
 
 local function ZM_Power_KillZombies(len, ply)
-    if not IsValid(ply) or not ply:IsZM() then return end
-    
+    if not IsValid(ply) or not ply:IsZM() or (ply.m_NextZombieKill or 0) > CurTime() then return end
+
+    local points = 0
     for _, ent in pairs(ents.FindByClass("npc_*")) do
-        if ent.bIsSelected then
+        //if ent.bIsSelected and ent:Alive() then
+		if ent.IsSelectedByZM and ent:IsSelectedByZM( ply ) and ent:Alive() then
             local dmginfo = DamageInfo()
             dmginfo:SetDamage(ent:Health() * 1.25)
-            ent:TakeDamageInfo(dmginfo) 
+            ent:TakeDamageInfo(dmginfo)
+
+            local zombietab = GAMEMODE:GetZombieData(ent:GetClass())
+            if zombietab then
+                points = points + (zombietab.Cost * 0.5)
+            end
         end
     end
-    
+    ply:AddZMPoints(points)
+    ply.m_NextZombieKill = CurTime() + 0.5
+
     ply:PrintTranslatedMessage(HUD_PRINTTALK, "killed_all_zombies")
 end
 net.Receive("zm_net_power_killzombies", ZM_Power_KillZombies)
 
 local function ZM_Power_SpotCreate_SV(len, ply)
-    local ret, message, tr = gamemode.Call("CanHiddenZombieBeCreated", ply, ply:EyePos(), net.ReadVector())
+    local ret, message, tr = hook.Call("CanHiddenZombieBeCreated", GAMEMODE, ply, ply:EyePos(), net.ReadVector())
     if not ret then
         ply:PrintTranslatedMessage(HUD_PRINTTALK, message)
         return
     end
-    
-    local pZombie = gamemode.Call("SpawnZombie", ply, "npc_zombie", tr.HitPos, ply:EyeAngles(), GetConVar("zm_spotcreate_cost"):GetInt(), true)
+
+    local pZombie = hook.Call("SpawnZombie", GAMEMODE, ply, "npc_zombie", tr.HitPos, ply:EyeAngles(), GetConVar("zm_spotcreate_cost"):GetInt(), true)
     if IsValid(pZombie) then
         ply:PrintTranslatedMessage(HUD_PRINTTALK, "hidden_zombie_spawned")
     end
@@ -140,23 +160,23 @@ net.Receive("zm_place_zombiespot", ZM_Power_SpotCreate_SV)
 
 local function ZM_Drop_Ammo(len, ply)
     if ply.ThrowDelay and ply.ThrowDelay > CurTime() then return end
-    
+
     local wep = ply:GetActiveWeapon()
-    
-    if not IsValid(wep) then return end
-    
+
+    if not IsValid(wep) or not wep.Primary or not wep.Primary.Ammo then return end
+
     local ammotype = wep.Primary.Ammo
-    
+
     if wep.IsMelee or ammotype == nil or ammotype == "none" or wep.CantThrowAmmo then return end
-    
+
     local amount = GAMEMODE.AmmoCache[ammotype]
-    
+
     if ply:GetAmmoCount(ammotype) == 0 then return end
-    
+
     if ply:GetAmmoCount(ammotype) < amount then
         amount = ply:GetAmmoCount(ammotype)
     end
-    
+
     local ammoclass = ""
     for class, name in pairs(GAMEMODE.AmmoClass) do
         if ammotype == name then
@@ -164,7 +184,7 @@ local function ZM_Drop_Ammo(len, ply)
             break
         end
     end
-    
+
     local ent = ents.Create("item_zm_ammo")
     if IsValid(ent) then
         local vecEye = ply:EyePos()
@@ -172,28 +192,29 @@ local function ZM_Drop_Ammo(len, ply)
         local vForward = angEye:Forward()
 
         local vecSrc = vecEye + vForward * 60.0
-    
+
         ent.Model = GAMEMODE.AmmoModels[ammoclass]
         ent.AmmoAmount = amount
         ent.AmmoType = GAMEMODE.AmmoClass[ammoclass]
         ent:SetClassName(ammoclass)
-        
+
+        ent:SetPos(vecSrc)
+        ent:Spawn()
+
         local pObj = ent:GetPhysicsObject()
         local vecVelocity = ply:GetAimVector() * 200
         if IsValid(pObj) then
+            pObj:Wake()
             pObj:AddVelocity(vecVelocity)
         else
             ent:SetVelocity(vecVelocity)
         end
-    
-        ent:SetPos(vecSrc)
-        ent:Spawn()
-        
+
         ent.ThrowTime = CurTime() + 1
 
         ply:RemoveAmmo(amount, ammotype)
     end
-    
+
     ply.ThrowDelay = CurTime() + 0.5
 end
 net.Receive("zm_net_dropammo", ZM_Drop_Ammo)
@@ -210,15 +231,20 @@ net.Receive("zm_net_dropweapon", ZM_Drop_Weapon)
 local function ZM_BoxSelect(len, ply)
     if ply:IsZM() then
         if not net.ReadBool() then
-            for _, npc in pairs(ents.FindByClass("npc_*")) do
-                if npc.bIsSelected then
-                    npc:SetNW2Bool("selected", false)
-                end
+            for _, npc in ipairs(ents.FindByClass("npc_*")) do
+                /*if npc.bIsSelected then
+                    npc:SetSelected(false)
+                end*/
+				if npc.IsSelectedByZM and npc:IsSelectedByZM( ply ) then
+					npc:SetSelected( nil )
+				end
             end
         end
-        
-        for _, npc in pairs(net.ReadTable()) do
-            npc:SetNW2Bool("selected", true)
+
+        for _, npc in ipairs(net.ReadTable()) do
+            if not IsValid(npc) then continue end
+            //npc:SetSelected(true)
+			npc:SetSelected( ply )
         end
     end
 end
@@ -228,9 +254,10 @@ local function ZM_Select(len, ply)
     if ply:IsZM() then
         local entity = net.ReadEntity()
         if not IsValid(entity) then return end
-    
-        if entity:IsNPC() then
-            entity:SetNW2Bool("selected", true)
+
+        if entity:IsNPC() or entity:IsNextBot() then
+            //entity:SetSelected(true)
+			entity:SetSelected( ply )
         end
     end
 end
@@ -239,9 +266,12 @@ net.Receive("zm_selectnpc", ZM_Select)
 local function ZM_Command_NPC(len, ply)
     if ply:IsZM() then
         local position = net.ReadVector()
-        
+
         for _, entity in pairs(ents.FindByClass("npc_*")) do
-            if IsValid(entity) and entity.bIsSelected and entity:IsNPC() then
+            /*if IsValid(entity) and entity.bIsSelected and (entity:IsNPC() or entity:IsNextBot()) then
+                entity:ForceGo(position)
+            end*/
+			if IsValid(entity) and entity.IsSelectedByZM and entity:IsSelectedByZM( ply ) and (entity:IsNPC() or entity:IsNextBot()) then
                 entity:ForceGo(position)
             end
         end
@@ -253,11 +283,16 @@ local function ZM_NPC_Target_Object(len, ply)
     if ply:IsZM() then
         local position = net.ReadVector()
         local ent = net.ReadEntity()
-        
+
         for _, entity in pairs(ents.FindByClass("npc_*")) do
-            if IsValid(entity) and entity.bIsSelected and entity:IsNPC() then
+            /*if IsValid(entity) and entity.bIsSelected and (entity:IsNPC() or entity:IsNextBot()) then
                 if IsValid(ent) then
-                    entity:ForceSwat(ent, ent:Health() > 0)
+                    entity:ForceSwat(ent, ent:Health() > 0, position)
+                end
+            end*/
+			if IsValid(entity) and entity.IsSelectedByZM and entity:IsSelectedByZM( ply ) and (entity:IsNPC() or entity:IsNextBot()) then
+                if IsValid(ent) then
+                    entity:ForceSwat(ent, ent:Health() > 0, position)
                 end
             end
         end
@@ -269,11 +304,17 @@ local function ZM_Deselect(len, ply)
     if ply:IsZM() then
         local ent = net.ReadEntity()
         if IsValid(ent) then
-            ent:SetNW2Bool("selected", false)
+            //ent:SetSelected(false)
+			if ent.IsSelectedByZM and ent:IsSelectedByZM( ply ) then
+				ent:SetSelected( nil )
+			end
         else
             for _, entity in pairs(ents.FindByClass("npc_*")) do
                 if not IsValid(entity) then continue end
-                entity:SetNW2Bool("selected", false)
+                //entity:SetSelected(false)
+				if entity.IsSelectedByZM and entity:IsSelectedByZM( ply ) then
+					entity:SetSelected( nil )
+				end
             end
         end
     end
@@ -295,12 +336,13 @@ net.Receive("zm_selectall_zombies", function(len, ply)
     if ply:IsZM() then
         for _, entity in pairs(ents.FindByClass("npc_*")) do
             if not IsValid(entity) then continue end
-            
-            if entity:IsNPC() then
-                entity:SetNW2Bool("selected", true)
+
+            if entity:IsNPC() or entity:IsNextBot() then
+                //entity:SetSelected(true)
+				entity:SetSelected( ply )
             end
         end
-        
+
         ply:PrintTranslatedMessage(HUD_PRINTTALK, "all_zombies_selected")
     end
 end)
@@ -310,17 +352,17 @@ net.Receive("zm_placetrigger", function(len, ply)
         local position = net.ReadVector()
         local entity = net.ReadEntity()
         if not IsValid(entity) then return end
-        
+
         local cost = entity:GetTrapCost()
-        
+
         if ply:CanAfford(cost) then
             local trigger = ents.Create("info_manipulate_trigger")
             trigger:SetPos(position)
             trigger:Spawn()
             trigger:SetParent(entity)
-        
+
             ply:TakeZMPoints(cost)
-            
+
             ply:PrintTranslatedMessage(HUD_PRINTTALK, "trap_created")
         end
     end
@@ -330,10 +372,10 @@ net.Receive("zm_spawnzombie", function(len, ply)
     if ply:IsZM() then
         local ent = net.ReadEntity()
         if not IsValid(ent) then return end
-        
+
         local zombietype = net.ReadString()
         local amount = net.ReadUInt(6)
-    
+
         ent:AddQuery(ply, zombietype, amount)
     end
 end)
@@ -342,7 +384,7 @@ net.Receive("zm_rqueue", function(len, ply)
     if ply:IsZM() then
         local entity = net.ReadEntity()
         if not IsValid(entity) then return end
-        
+
         local clear = net.ReadBool()
         if clear then
             entity:ClearQueue(true)
@@ -356,20 +398,20 @@ net.Receive("zm_placerally", function(len, ply)
     if ply:IsZM() then
         local position = net.ReadVector() + Vector(0, 0, 7)
         local entity = net.ReadEntity()
-        
+
         if IsValid(entity) then
             local rally = entity:GetRallyEntity()
             if IsValid(rally) then
                 rally:Remove()
             end
-            
+
             local rallyPoint = ents.Create("info_rallypoint")
             rallyPoint:SetPos(position)
             rallyPoint:Spawn()
             rallyPoint:ActivateRallyPoint()
 
             entity:SetRallyEntity(rallyPoint)
-            
+
             ply:PrintTranslatedMessage(HUD_PRINTTALK, "rally_created")
         end
     end
@@ -381,29 +423,30 @@ GM.selectedgroup = 0
 net.Receive("zm_creategroup", function(len, ply)
     if ply:IsZM() then
         if GAMEMODE.currentmaxgroup >= 9 then return end
-        
+
         table.Empty(GAMEMODE.groups)
-        
+
         currentmaxgroup = GAMEMODE.currentmaxgroup + 1
         GAMEMODE.groups[currentmaxgroup] = {}
-        
+
         local groupadd = GAMEMODE.groups[currentmaxgroup]
         for _, npc in pairs(ents.FindByClass("npc_*")) do
-            if npc.bIsSelected then
+            //if npc.bIsSelected then
+			if npc.IsSelectedByZM and npc:IsSelectedByZM( ply ) then
                 table.insert(groupadd, npc)
             end
         end
-        
+
         if #groupadd <= 0 then return end
-        
+
         GAMEMODE.selectedgroup = currentmaxgroup
-        
+
         ply:PrintTranslatedMessage(HUD_PRINTTALK, "group_created")
 
         net.Start("zm_sendcurrentgroups")
             net.WriteTable(GAMEMODE.groups)
         net.Send(ply)
-        
+
         net.Start("zm_sendselectedgroup")
             net.WriteUInt(GAMEMODE.selectedgroup, 8)
         net.Send(ply)
@@ -420,7 +463,7 @@ net.Receive("zm_setselectedgroup", function(len, ply)
                     break
                 end
             end
-            
+
             net.Start("zm_sendselectedgroup")
                 net.WriteUInt(GAMEMODE.selectedgroup, 8)
             net.Send(ply)
@@ -432,13 +475,13 @@ net.Receive("zm_selectgroup", function(len, ply)
     if ply:IsZM() then
         local selection = GAMEMODE.groups[GAMEMODE.selectedgroup] or {}
         for i, npc in pairs(selection) do
-            if IsValid(npc) and npc:IsNPC() then
-                npc:SetNW2Bool("selected", true)
+            if IsValid(npc) and (npc:IsNPC() or ent:IsNextBot()) then
+                npc:SetSelected(true)
             end
         end
-        
+
         if #selection <= 0 then return end
-        
+
         ply:PrintTranslatedMessage(HUD_PRINTTALK, "group_selected")
     end
 end)
@@ -446,7 +489,8 @@ end)
 net.Receive("zm_switch_to_defense", function(len, ply)
     if ply:IsZM() then
         for _, entity in pairs(ents.FindByClass("npc_*")) do
-            if IsValid(entity) and entity.bIsSelected and entity:IsNPC() then
+            //if IsValid(entity) and entity.bIsSelected and (entity:IsNPC() or entity:IsNextBot()) then
+			if IsValid(entity) and entity.IsSelectedByZM and entity:IsSelectedByZM( ply ) and (entity:IsNPC() or entity:IsNextBot()) then
                 entity:SetSchedule(SCHED_AMBUSH)
                 entity:StopMoving()
                 entity.DefencePoint = entity:GetPos()
@@ -461,7 +505,8 @@ end)
 net.Receive("zm_switch_to_offense", function(len, ply)
     if ply:IsZM() then
         for _, entity in pairs(ents.FindByClass("npc_*")) do
-            if IsValid(entity) and entity.bIsSelected and entity:IsNPC() then
+            //if IsValid(entity) and entity.bIsSelected and (entity:IsNPC() or entity:IsNextBot()) then
+			if IsValid(entity) and entity.IsSelectedByZM and entity:IsSelectedByZM( ply ) and (entity:IsNPC() or entity:IsNextBot()) then
                 entity:SetSchedule(SCHED_ALERT_WALK)
                 entity.DefencePoint = nil
                 entity.InDefenceMode = nil
@@ -477,16 +522,17 @@ net.Receive("zm_create_ambush_point", function(len, ply)
         local bFoundSelected = false
         local npc_table = {}
         for _, npc in pairs(ents.FindByClass("npc_*")) do
-            if IsValid(npc) and npc.bIsSelected and npc:IsNPC() then
+            //if IsValid(npc) and npc.bIsSelected and (npc:IsNPC() or npc:IsNextBot()) then
+			if IsValid(npc) and npc.IsSelectedByZM and npc:IsSelectedByZM( ply ) and (npc:IsNPC() or npc:IsNextBot()) then
                 npc:SetSchedule(SCHED_AMBUSH)
                 npc:StopMoving()
-                
+
                 npc_table[#npc_table + 1] = npc
-                
+
                 bFoundSelected = true
             end
         end
-        
+
         if not bFoundSelected then
             ply:PrintTranslatedMessage(HUD_PRINTTALK, "no_zombies_selected")
             return
@@ -497,17 +543,17 @@ net.Receive("zm_create_ambush_point", function(len, ply)
                     break
                 end
             end
-            
+
             local trigger = ents.Create("info_ambush_point")
             trigger:SetPos(position)
             trigger:Spawn()
             trigger.EntOwners = npc_table
-            
+
             for _, npc in pairs(npc_table) do
                 npc.AmbushPointEnt = trigger
             end
         end
-        
+
         ply:PrintTranslatedMessage(HUD_PRINTTALK, "placed_ambush_point")
     end
 end)
@@ -517,26 +563,29 @@ net.Receive("zm_cling_ceiling", function(len, ply)
         local bFoundClingZombie = false
         for _, entity in pairs(ents.FindByClass("npc_*")) do
             local zombietab = GAMEMODE:GetZombieData(entity:GetClass())
-            if IsValid(entity) and entity.bIsSelected and entity:IsNPC() and zombietab.CanClingToCeiling then
+            //if IsValid(entity) and entity.bIsSelected and (entity:IsNPC() or entity:IsNextBot()) and zombietab.CanClingToCeiling then
+			if IsValid(entity) and entity.IsSelectedByZM and entity:IsSelectedByZM( ply ) and (entity:IsNPC() or entity:IsNextBot()) and zombietab.CanClingToCeiling then
                 if not entity.m_bClinging then
                     if GAMEMODE:CallZombieFunction(entity, "CheckCeiling") then
-                        entity:SetNW2Bool("bClingingCeiling", true)
+                        entity:SetCeilingCling(true)
                         entity:SetMoveType(MOVETYPE_NONE)
+                        entity:SetSolid(SOLID_OBB)
+                        entity:AddSolidFlags(FSOLID_FORCE_WORLD_ALIGNED)
                         entity.m_flLastClingCheck = CurTime()
                         bFoundCeiling = true
                     end
                 else
                     GAMEMODE:CallZombieFunction(entity, "DetachFromCeiling")
                 end
-                
+
                 bFoundClingZombie = true
             end
         end
-        
+
         if not bFoundCeiling then
             ply:PrintTranslatedMessage(HUD_PRINTTALK, "no_flat_or_range_ceiling")
         end
-        
+
         if not bFoundClingZombie then
             ply:PrintTranslatedMessage(HUD_PRINTTALK, "no_valid_zombies_selected_for_cling")
         end
@@ -549,3 +598,23 @@ net.Receive("zm_player_ready", function(len, ply)
         hook.Call("InitClient", GAMEMODE, ply)
     end
 end)
+
+local HullSizes = {}
+HullSizes[HULL_HUMAN] = {mins = Vector(-13, -13, 0), maxs = Vector(13, 13, 72)}
+HullSizes[HULL_SMALL_CENTERED] = {mins = Vector(-20, -20, -20), maxs = Vector(20, 20, 20)}
+HullSizes[HULL_WIDE_HUMAN] = {mins = Vector(-15, -15, 0), maxs = Vector(15, 15, 72)}
+HullSizes[HULL_TINY] = {mins = Vector(-12, -12, 0), maxs = Vector(12, 12, 24)}
+HullSizes[HULL_WIDE_SHORT] = {mins = Vector(-35, -35, 0), maxs = Vector(35, 35, 32)}
+HullSizes[HULL_MEDIUM] = {mins = Vector(-16, -16, 0), maxs = Vector(16, 16, 64)}
+HullSizes[HULL_TINY_CENTERED] = {mins = Vector(-8, -8, -4), maxs = Vector(8, 8, 4)}
+HullSizes[HULL_LARGE] = {mins = Vector(-40, -40, 0), maxs = Vector(40, 40, 100)}
+HullSizes[HULL_LARGE_CENTERED] = {mins = Vector(-38, -38, -38), maxs = Vector(38, 38, 38)}
+HullSizes[HULL_MEDIUM_TALL] = {mins = Vector(-16, -16, 0), maxs = Vector(16, 16, 100)}
+
+function GetAIHullSize(hulltype)
+    if HullSizes[hulltype] then
+        return Vector(HullSizes[hulltype].mins), Vector(HullSizes[hulltype].maxs)
+    end
+
+    return Vector(0, 0, 0), Vector(0, 0, 0)
+end

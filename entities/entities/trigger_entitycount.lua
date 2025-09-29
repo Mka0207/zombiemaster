@@ -3,6 +3,8 @@ if CLIENT then return end
 DEFINE_BASECLASS("scripted_trigger")
 ENT.Type = "brush"
 
+ENT.TriggerOutput = TriggerOutputOverride
+
 local valid = {
     "prop_physics",
     "func_physbox",
@@ -60,7 +62,7 @@ function ENT:AcceptInput(name, caller, activator, arg)
             self:Input("OnNotCount", self)
         end
     elseif string.Left(name, 2) == "on" then
-        self:TriggerOutput(name, activator, args)
+        self:TriggerOutput(name, activator, arg)
     end
 end
 
@@ -78,7 +80,7 @@ end
 
 function ENT:PassesTriggerFilters(entity)
     local flag = self.m_iTriggerFlags
-    return (flag == 1 and entity:IsPlayer() and entity:IsSurvivor()) or (flag == 2 and entity:IsNPC()) or (flag == 3 and PassesFlag(entity))
+    return (flag == 1 and entity:IsPlayer() and entity:IsSurvivor()) or (flag == 2 and (entity:IsNPC() or entity:IsNextBot())) or (flag == 3 and PassesFlag(entity))
 end
 
 function ENT:UpdateTransmitState()

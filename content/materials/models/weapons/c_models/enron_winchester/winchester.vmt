@@ -1,0 +1,15 @@
+"VertexLitGeneric"
+{
+	"$baseTexture" "models\weapons\c_models\enron_winchester\winchester"
+    "$bumpmap" "models\weapons\c_models\enron_winchester\winchester_normal"
+	"$envmap" "env_cubemap"
+	"$normalmapalphaenvmapmask" "1"
+	
+	$envmaptint "[0.005 0.005 0.005]"
+	$phong "1"
+	$phongexponent			16			// either/or
+	$phongboost				16
+	$phongfresnelranges		"[1 1 1]"
+	$phongalbedotint "1"
+	$phongexponenttexture "vgui/white"
+}

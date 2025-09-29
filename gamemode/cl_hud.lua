@@ -1,26 +1,40 @@
+local ScreenW, ScreenH = ScrW(), ScrH()
+hook.Add("OnScreenSizeChanged", "OnScreenSizeChanged.HUD", function()
+    ScreenH = ScrH()
+    ScreenW = ScrW()
+end)
+
+local localTeam = LocalPlayer():IsValid() and LocalPlayer():Team()
+hook.Add("OnPlayerChangedTeam", "OnPlayerChangedTeam.HUD", function(pl, old, new)
+    if pl == MySelf then localTeam = new end
+end)
+
 gui.OldEnableScreenClicker = gui.OldEnableScreenClicker or gui.EnableScreenClicker
 function gui.EnableScreenClicker(b, bForce)
-    if not b and LocalPlayer():IsZM() and not bForce then 
+    if not b and localTeam == TEAM_ZOMBIEMASTER and not bForce then
         return
     end
-    
+
     gui.OldEnableScreenClicker(b)
 end
 
 function GM:HUDPaint()
-    if player_manager.RunClass(LocalPlayer(), "DrawHUD") then return end
-    
-    hook.Call( "HUDDrawTargetID", self )
+    if player_manager.RunClass(MySelf, "DrawHUD") then return end
+
+    hook.Call( "HUDDrawTargetID", self, localTeam )
     hook.Call( "HUDDrawPickupHistory", self )
-    hook.Call( "DrawDeathNotice", self, 0.85, 0.04 )
 end
 
+local hide = {
+	["CHudHealth"] = true,
+	["CHudBattery"] = true,
+	["CHudAmmo"] = true,
+	["CHudSecondaryAmmo"] = true,
+	["CHudCrosshair"] = true,
+	["CHUDQuickInfo"] = true
+}
 function GM:HUDShouldDraw(name)
-    if LocalPlayer().IsSurvivor and LocalPlayer():IsSurvivor() and name == "CHudCrosshair" then
-        return true
-    else
-        return name ~= "CHudHealth" and name ~= "CHudBattery" and name ~= "CHudAmmo" and name ~= "CHudSecondaryAmmo" and name ~= "CHudCrosshair"
-    end
+    return not hide[name]
 end
 
 local defaultHelpStr = [[
@@ -66,7 +80,7 @@ local defaultHelpStr = [[
 ]]
 function MakepHelp()
     local frame = vgui.Create( "DFrame" )
-    frame:SetSize(ScrW() * 0.6, ScrH() * 0.6)
+    frame:SetSize(ScreenW * 0.6, ScreenH * 0.6)
     frame:SetTitle("Help")
     frame:SetVisible(true)
     frame:SetDraggable(true)
@@ -78,7 +92,7 @@ function MakepHelp()
             GAMEMODE:ShowOptions()
         end
     end
-    
+
     local html = vgui.Create("DHTML", frame)
     html:Dock(FILL)
     html:SetHTML(Either(GAMEMODE.HelpInfo == "No Info", defaultHelpStr, GAMEMODE.HelpInfo))
@@ -87,7 +101,7 @@ function MakepHelp()
 end
 
 function MakepCredits()
-    local wid = math.min(ScrW(), 750)
+    local wid = math.min(ScreenW, 750)
     local frame = vgui.Create("DFrame")
     frame:SetWide(wid)
     frame:SetTitle("")
@@ -100,9 +114,9 @@ function MakepCredits()
     label:SizeToContents()
     label:AlignTop(8)
     label:CenterHorizontal()
-    
+
     local creditslist = vgui.Create("DScrollPanel", frame)
-    creditslist:SetSize(wid * 0.99, ScrH() * 0.55)
+    creditslist:SetSize(wid * 0.99, ScreenH * 0.55)
     creditslist:MoveBelow(label)
     creditslist:CenterHorizontal()
 
@@ -113,18 +127,18 @@ function MakepCredits()
         base:Dock(TOP)
         base:DockMargin(0, 4, 0, 4)
         base:DockPadding(0, 4, 0, 4)
-        
+
         local avatar = vgui.Create("DClickableAvatar", base)
         if authortab.SteamID ~= "" then
             avatar.DoClick = function(self, code) gui.OpenURL("http://steamcommunity.com/profiles/"..util.SteamIDTo64(authortab.SteamID)) end
         else
             avatar:SetEnabled(false)
         end
-        
+
         local lineleft = Label(string.Replace(authortab.Name, "@", "(at)"), base)
         local linemid = Label("-", base)
         local lineright = Label(authortab.Description, base)
-        
+
         local linesub
         if authortab.Website then
             linesub = vgui.Create("DLabelURL", base)
@@ -132,7 +146,7 @@ function MakepCredits()
             linesub:SetURL(authortab.Website)
             linesub:SizeToContents()
         end
-        
+
         avatar:SetSize(32, 32)
         avatar:SetSteamID(util.SteamIDTo64(authortab.SteamID), 32)
         lineleft:SetFont("OptionsHelp")
@@ -141,7 +155,7 @@ function MakepCredits()
         lineright:SizeToContents()
         linemid:SetFont("OptionsHelp")
         linemid:SizeToContents()
-        
+
         avatar:SetAlpha(0)
         lineleft:SetAlpha(0)
         lineright:SetAlpha(0)
@@ -162,20 +176,20 @@ function MakepCredits()
             linesub:SetAlpha(0)
             linesub:AlphaTo(255, alphatime)
         end
-        
+
         base:InvalidateLayout(true)
         base:SizeToChildren(false, true)
-        
+
         alphatime = alphatime + 0.1
     end
-    
+
     frame:InvalidateLayout(true)
     frame:SizeToChildren(false, true)
     frame:Center()
     frame:SetAlpha(0)
     frame:AlphaTo(255, 0.5, 0)
     frame:MakePopup()
-    
+
     return frame
 end
 
@@ -197,55 +211,55 @@ function MakepOptions()
     end
 
     local Window = vgui.Create("DFrame")
-    local wide = math.min(ScrW(), 500)
-    local tall = math.min(ScrH(), 580)
+    local wide = math.min(ScreenW, 500)
+    local tall = math.min(ScreenH, 580)
     Window:SetSize(wide, tall)
     Window:Center()
     Window:SetTitle(" ")
     Window:SetDeleteOnClose(false)
     Window.btnMinim:SetVisible(false)
     Window.btnMaxim:SetVisible(false)
-    
+
     Window.OnClose = function(self)
-        if LocalPlayer().HadMenuOpen and not IsValid(self.OptionsMenu) then
+        if MySelf.HadMenuOpen and not IsValid(self.OptionsMenu) then
             GAMEMODE:ShowOptions()
         end
     end
-    
+
     pOptions = Window
-    
+
     local header = Label(translate.Get("button_options"), Window)
     header:SetFont("zm_hud_font_normal")
     header:SizeToContents()
     header:CenterHorizontal()
     header:AlignTop(8)
-    
+
     local list = vgui.Create("DScrollPanel", pOptions)
     list:DockMargin(0, 24, 0, 0)
     list:Dock(FILL)
     list:SetPadding(8)
 
     hook.Call("AddExtraOptions", GAMEMODE, list, Window)
-    
+
     local catagory = vgui.Create("DCollapsibleCategory", list)
     catagory:SetSize(64, 64)
     catagory:Dock(TOP)
     catagory:DockMargin(0, 0, 0, 8)
     catagory:SetExpanded(0)
     catagory:SetLabel(translate.Get("volunteer_settings"))
-    
+
     local catagorylist = vgui.Create("DScrollPanel", list)
     catagorylist:GetCanvas():DockPadding(0, 8, 0, 8)
     catagory:SetContents(catagorylist)
-    
+
     local check = vgui.Create("DCheckBoxLabel")
     check:SetText(translate.Get("dont_show_vol_menu"))
     check:SetConVar("zm_nopreferredmenu")
     check:SizeToContents()
     check:Dock(TOP)
     check:DockMargin(0, 8, 0, 4)
-    catagorylist:AddItem(check)    
-    
+    catagorylist:AddItem(check)
+
     local but = vgui.Create("DButton")
     but:SetTall(24)
     but:SetFont("OptionsHelpBig")
@@ -256,25 +270,25 @@ function MakepOptions()
         RunConsoleCommand("zm_open_preferred_menu")
     end
     catagorylist:AddItem(but)
-    
+
     local catagory = vgui.Create("DCollapsibleCategory", list)
     catagory:SetSize(64, 64)
     catagory:Dock(TOP)
     catagory:DockMargin(0, 0, 0, 8)
     catagory:SetExpanded(0)
     catagory:SetLabel(translate.Get("keybind_settings"))
-    
+
     local catagorylist = vgui.Create("DScrollPanel", list)
     catagorylist:GetCanvas():DockPadding(0, 8, 0, 8)
     catagory:SetContents(catagorylist)
-    
+
     local label = Label(translate.Get("drop_wep_key"), list)
     label:SetFont("OptionsHelp")
     label:SizeToContents()
     label:Dock(TOP)
     label:DockMargin(0, 8, 0, 4)
-    catagorylist:AddItem(label)    
-    
+    catagorylist:AddItem(label)
+
     local binder = vgui.Create("DBinder", list)
     binder:SetTall(24)
     binder:SetFont("OptionsHelpBig")
@@ -283,15 +297,15 @@ function MakepOptions()
     binder.UpdateText = BinderTextUpdate
     binder:Dock(TOP)
     binder:DockMargin(0, 8, 0, 4)
-    catagorylist:AddItem(binder)    
-    
+    catagorylist:AddItem(binder)
+
     local label = Label(translate.Get("drop_ammo_key"), list)
     label:SetFont("OptionsHelp")
     label:SizeToContents()
     label:Dock(TOP)
     label:DockMargin(0, 8, 0, 4)
-    catagorylist:AddItem(label)    
-    
+    catagorylist:AddItem(label)
+
     local binder = vgui.Create("DBinder", list)
     binder:SetTall(24)
     binder:SetFont("OptionsHelpBig")
@@ -300,15 +314,15 @@ function MakepOptions()
     binder.UpdateText = BinderTextUpdate
     binder:Dock(TOP)
     binder:DockMargin(0, 8, 0, 4)
-    catagorylist:AddItem(binder)    
-    
+    catagorylist:AddItem(binder)
+
     local label = Label(translate.Get("kill_zombies_key"), list)
     label:SetFont("OptionsHelp")
     label:SizeToContents()
     label:Dock(TOP)
     label:DockMargin(0, 8, 0, 4)
-    catagorylist:AddItem(label)    
-    
+    catagorylist:AddItem(label)
+
     local binder = vgui.Create("DBinder", list)
     binder:SetTall(24)
     binder:SetFont("OptionsHelpBig")
@@ -317,19 +331,36 @@ function MakepOptions()
     binder.UpdateText = BinderTextUpdate
     binder:Dock(TOP)
     binder:DockMargin(0, 8, 0, 4)
-    catagorylist:AddItem(binder)    
-    
+    catagorylist:AddItem(binder)
+
+    local label = Label(translate.Get("teleport_key"), list)
+    label:SetFont("OptionsHelp")
+    label:SizeToContents()
+    label:Dock(TOP)
+    label:DockMargin(0, 8, 0, 4)
+    catagorylist:AddItem(label)
+
+    local binder = vgui.Create("DBinder", list)
+    binder:SetTall(24)
+    binder:SetFont("OptionsHelpBig")
+    binder:SetConVar("zm_teleportkey")
+    binder:SizeToContents()
+    binder.UpdateText = BinderTextUpdate
+    binder:Dock(TOP)
+    binder:DockMargin(0, 8, 0, 4)
+    catagorylist:AddItem(binder)
+
     local catagory = vgui.Create("DCollapsibleCategory", list)
     catagory:SetSize(64, 64)
     catagory:Dock(TOP)
     catagory:DockMargin(0, 0, 0, 8)
     catagory:SetExpanded(0)
     catagory:SetLabel(translate.Get("ragdoll_settings"))
-    
+
     local catagorylist = vgui.Create("DScrollPanel", list)
     catagorylist:GetCanvas():DockPadding(0, 8, 0, 8)
     catagory:SetContents(catagorylist)
-    
+
     local check = vgui.Create("DCheckBoxLabel", list)
     check:SetText(translate.Get("ragdoll_fadeout"))
     check:SetConVar("zm_shouldragdollsfade")
@@ -337,7 +368,7 @@ function MakepOptions()
     check:Dock(TOP)
     check:DockMargin(0, 8, 0, 4)
     catagorylist:AddItem(check)
-    
+
     local slider = vgui.Create("DNumSlider", list)
     slider:SetDecimals(0)
     slider:SetMinMax(1, 1000)
@@ -347,7 +378,7 @@ function MakepOptions()
     slider:Dock(TOP)
     slider:DockMargin(0, 8, 0, 4)
     catagorylist:AddItem(slider)
-    
+
     local slider = vgui.Create("DNumSlider", list)
     slider:SetDecimals(0)
     slider:SetMinMax(1, 300)
@@ -357,18 +388,18 @@ function MakepOptions()
     slider:Dock(TOP)
     slider:DockMargin(0, 8, 0, 4)
     catagorylist:AddItem(slider)
-    
+
     local catagory = vgui.Create("DCollapsibleCategory", list)
     catagory:SetSize(64, 64)
     catagory:Dock(TOP)
     catagory:DockMargin(0, 0, 0, 8)
     catagory:SetExpanded(0)
     catagory:SetLabel(translate.Get("quality_settings"))
-    
+
     local catagorylist = vgui.Create("DScrollPanel", list)
     catagorylist:GetCanvas():DockPadding(0, 8, 0, 8)
     catagory:SetContents(catagorylist)
-    
+
     local qualitylab = vgui.Create("DLabel", list)
     qualitylab:Dock(TOP)
     qualitylab:SetFont("OptionsHelp")
@@ -376,7 +407,7 @@ function MakepOptions()
     qualitylab:SetTextColor(color_white)
     qualitylab:SizeToContents()
     catagorylist:AddItem(qualitylab)
-    
+
     local qualitynum = cvars.Number("zm_vision_quality", 0)
     local dropdown = vgui.Create("DComboBox", list)
     dropdown:Dock(TOP)
@@ -385,11 +416,14 @@ function MakepOptions()
     dropdown:AddChoice("LD")
     dropdown:AddChoice("Off")
     dropdown.OnSelect = function(me, index, value, data)
+        if GAMEMODE.NightVision then
+            RunConsoleCommand("zm_power_nightvision")
+        end
         RunConsoleCommand("zm_vision_quality", value == "HD" and 2 or value == "LD" and 1 or 0)
     end
     dropdown:SetText(qualitynum == 2 and "HD" or qualitynum == 1 and "LD" or "Off")
     catagorylist:AddItem(dropdown)
-    
+
     local qualitylab = vgui.Create("DLabel", list)
     qualitylab:Dock(TOP)
     qualitylab:SetFont("OptionsHelp")
@@ -397,7 +431,7 @@ function MakepOptions()
     qualitylab:SetTextColor(color_white)
     qualitylab:SizeToContents()
     catagorylist:AddItem(qualitylab)
-    
+
     local qualitynum = cvars.Number("zm_cl_nightvision_type", 0)
     local dropdown = vgui.Create("DComboBox", list)
     dropdown:Dock(TOP)
@@ -409,7 +443,7 @@ function MakepOptions()
     end
     dropdown:SetText(qualitynum == 1 and "Dynamic Light" or "Full Bright")
     catagorylist:AddItem(dropdown)
-    
+
     local qualitylab = vgui.Create("DLabel", list)
     qualitylab:Dock(TOP)
     qualitylab:SetFont("OptionsHelp")
@@ -417,7 +451,7 @@ function MakepOptions()
     qualitylab:SetTextColor(color_white)
     qualitylab:SizeToContents()
     catagorylist:AddItem(qualitylab)
-    
+
     local qualitynum = cvars.Number("zm_cl_spawntype", 0)
     local dropdown = vgui.Create("DComboBox", list)
     dropdown:Dock(TOP)
@@ -429,7 +463,7 @@ function MakepOptions()
     end
     dropdown:SetText(qualitynum == 1 and "Zombie Master : Reborn" or "Original")
     catagorylist:AddItem(dropdown)
-    
+
     local qualitylab = vgui.Create("DLabel", list)
     qualitylab:Dock(TOP)
     qualitylab:SetFont("OptionsHelp")
@@ -437,7 +471,7 @@ function MakepOptions()
     qualitylab:SetTextColor(color_white)
     qualitylab:SizeToContents()
     catagorylist:AddItem(qualitylab)
-    
+
     local qualitynum = cvars.Number("zm_hudtype", 0)
     local dropdown = vgui.Create("DComboBox", list)
     dropdown:Dock(TOP)
@@ -449,7 +483,7 @@ function MakepOptions()
     end
     dropdown:SetText(qualitynum == 1 and "Zombie Master : Reborn" or "Original")
     catagorylist:AddItem(dropdown)
-    
+
     local check = vgui.Create("DCheckBoxLabel", list)
     check:SetText(translate.Get("should_draw_itemhalo"))
     check:SetConVar("zm_drawitemhalos")
@@ -457,15 +491,15 @@ function MakepOptions()
     check:Dock(TOP)
     check:DockMargin(0, 8, 0, 4)
     catagorylist:AddItem(check)
-    
+
     local check = vgui.Create("DCheckBoxLabel", list)
     check:SetText(translate.Get("should_draw_weaponhalo"))
     check:SetConVar("zm_drawweaponhalos")
     check:SizeToContents()
     check:Dock(TOP)
     check:DockMargin(0, 8, 0, 4)
-    catagorylist:AddItem(check)    
-    
+    catagorylist:AddItem(check)
+
     local check = vgui.Create("DCheckBoxLabel", list)
     check:SetText(translate.Get("no_halos"))
     check:SetConVar("zm_nohalos")
@@ -473,7 +507,7 @@ function MakepOptions()
     check:Dock(TOP)
     check:DockMargin(0, 8, 0, 4)
     catagorylist:AddItem(check)
-    
+
     local check = vgui.Create("DCheckBoxLabel", list)
     check:SetText(translate.Get("only_draw_silhouette_invision"))
     check:SetConVar("zm_silhouette_zmvision_only")
@@ -481,18 +515,58 @@ function MakepOptions()
     check:Dock(TOP)
     check:DockMargin(0, 8, 0, 4)
     catagorylist:AddItem(check)
-    
+
     local catagory = vgui.Create("DCollapsibleCategory", list)
     catagory:SetSize(64, 64)
     catagory:Dock(TOP)
     catagory:DockMargin(0, 0, 0, 8)
     catagory:SetExpanded(0)
     catagory:SetLabel(translate.Get("other_settings"))
-    
+
     local catagorylist = vgui.Create("DScrollPanel", list)
     catagorylist:GetCanvas():DockPadding(0, 8, 0, 8)
     catagory:SetContents(catagorylist)
-    
+
+    local check = vgui.Create("DCheckBoxLabel", list)
+    check:SetText(translate.Get("disable_gore"))
+    check:SetConVar("zm_cl_disable_gore")
+    check:SizeToContents()
+    check:Dock(TOP)
+    check:DockMargin(0, 8, 0, 4)
+    catagorylist:AddItem(check)
+
+    local check = vgui.Create("DCheckBoxLabel", list)
+    check:SetText(translate.Get("enable_damage_numbers"))
+    check:SetConVar("zm_hitnumber_enabled")
+    check:SizeToContents()
+    check:Dock(TOP)
+    check:DockMargin(0, 8, 0, 4)
+    catagorylist:AddItem(check)
+
+    local check = vgui.Create("DCheckBoxLabel", list)
+    check:SetText(translate.Get("disable_hands"))
+    check:SetConVar("zm_disable_hands")
+    check:SizeToContents()
+    check:Dock(TOP)
+    check:DockMargin(0, 8, 0, 4)
+    catagorylist:AddItem(check)
+
+	local check = vgui.Create("DCheckBoxLabel", list)
+    check:SetText(translate.Get("enable_immersive_hands"))
+    check:SetConVar("zm_cl_custom_hands")
+    check:SizeToContents()
+    check:Dock(TOP)
+    check:DockMargin(0, 8, 0, 4)
+    catagorylist:AddItem(check)
+
+	local check = vgui.Create("DCheckBoxLabel", list)
+    check:SetText(translate.Get("disable_legs"))
+    check:SetConVar("zm_cl_custom_hands_no_legs")
+    check:SizeToContents()
+    check:Dock(TOP)
+    check:DockMargin(0, 8, 0, 4)
+    catagorylist:AddItem(check)
+
     local check = vgui.Create("DCheckBoxLabel", list)
     check:SetText(translate.Get("enable_hints"))
     check:SetConVar("zm_cl_enablehints")
@@ -500,7 +574,25 @@ function MakepOptions()
     check:Dock(TOP)
     check:DockMargin(0, 8, 0, 4)
     catagorylist:AddItem(check)
-    
+
+    local check = vgui.Create("DCheckBoxLabel", list)
+    check:SetText(translate.Get("enable_colormod"))
+    check:SetConVar("zm_cl_enablecolormod")
+    check:SizeToContents()
+    check:Dock(TOP)
+    check:DockMargin(0, 8, 0, 4)
+    catagorylist:AddItem(check)
+
+    local slider = vgui.Create("DNumSlider", list)
+    slider:SetDecimals(0)
+    slider:SetMinMax(0, 2048)
+    slider:SetConVar("zm_transparencyradius")
+    slider:SetText(translate.Get("transparency_radius"))
+    slider:SizeToContents()
+    slider:Dock(TOP)
+    slider:DockMargin(0, 8, 0, 4)
+    catagorylist:AddItem(slider)
+
     local slider = vgui.Create("DNumSlider", list)
     slider:SetDecimals(2)
     slider:SetMinMax(0, 1)
@@ -510,7 +602,7 @@ function MakepOptions()
     slider:Dock(TOP)
     slider:DockMargin(0, 8, 0, 4)
     catagorylist:AddItem(slider)
-    
+
     local slider = vgui.Create("DNumSlider", list)
     slider:SetDecimals(2)
     slider:SetMinMax(0, 1)
@@ -520,7 +612,7 @@ function MakepOptions()
     slider:Dock(TOP)
     slider:DockMargin(0, 8, 0, 4)
     catagorylist:AddItem(slider)
-    
+
     local slider = vgui.Create("DNumSlider", list)
     slider:SetDecimals(0)
     slider:SetMinMax(5, 100)
@@ -530,17 +622,7 @@ function MakepOptions()
     slider:Dock(TOP)
     slider:DockMargin(0, 8, 0, 4)
     catagorylist:AddItem(slider)
-    
-    local slider = vgui.Create("DNumSlider", list)
-    slider:SetDecimals(0)
-    slider:SetMinMax(75, 100)
-    slider:SetConVar("fov_desired")
-    slider:SetText(translate.Get("zm_playerfov"))
-    slider:SizeToContents()
-    slider:Dock(TOP)
-    slider:DockMargin(0, 8, 0, 4)
-    catagorylist:AddItem(slider)
-    
+
     local colorlab = vgui.Create("DLabel", list)
     colorlab:Dock(TOP)
     colorlab:SetFont("OptionsHelp")
@@ -548,7 +630,7 @@ function MakepOptions()
     colorlab:SetTextColor(color_white)
     colorlab:SizeToContents()
     catagorylist:AddItem(colorlab)
-    
+
     local colormix = vgui.Create("DColorMixer", list)
     colormix:Dock(TOP)
     colormix:SetPalette(true)
@@ -557,7 +639,7 @@ function MakepOptions()
     colormix:SetConVarG("zm_itemhalo_g")
     colormix:SetConVarB("zm_itemhalo_b")
     catagorylist:AddItem(colormix)
-    
+
     local colorlab = vgui.Create("DLabel", list)
     colorlab:Dock(TOP)
     colorlab:SetFont("OptionsHelp")
@@ -565,7 +647,7 @@ function MakepOptions()
     colorlab:SetTextColor(color_white)
     colorlab:SizeToContents()
     catagorylist:AddItem(colorlab)
-    
+
     local colormix = vgui.Create("DColorMixer", list)
     colormix:Dock(TOP)
     colormix:SetPalette(true)
@@ -584,12 +666,12 @@ function GM:ShowOptions()
     if self.OptionsMenu and self.OptionsMenu:Valid() then
         self.OptionsMenu:Remove()
     end
-    
+
     local menu = vgui.Create("DPanel")
-    menu:SetSize(420, ScrH() * 0.35)
+    menu:SetSize(420, ScreenH * 0.35)
     menu:Center()
-    
-    LocalPlayer().HadMenuOpen = true
+
+    MySelf.HadMenuOpen = true
 
     local header = Label(self.Name, menu)
     header:SetFont("zm_hud_font_normal")
@@ -597,7 +679,7 @@ function GM:ShowOptions()
     header:SetContentAlignment(8)
     header:DockMargin(0, 12, 0, 24)
     header:Dock(TOP)
-    
+
     local but = vgui.Create("DButton", menu)
     but:SetFont("OptionsHelpBig")
     but:SetText(translate.Get("button_help"))
@@ -606,7 +688,7 @@ function GM:ShowOptions()
     but:DockPadding(0, 12, 0, 12)
     but:Dock(TOP)
     but.DoClick = function() MakepHelp() menu:Remove() end
-    
+
     local but = vgui.Create("DButton", menu)
     but:SetFont("OptionsHelpBig")
     but:SetText(translate.Get("button_playermodel"))
@@ -615,7 +697,7 @@ function GM:ShowOptions()
     but:DockPadding(0, 12, 0, 12)
     but:Dock(TOP)
     but.DoClick = function() RunConsoleCommand("playermodel_selector") end
-    
+
     local but = vgui.Create("DButton", menu)
     but:SetFont("OptionsHelpBig")
     but:SetText(translate.Get("button_options"))
@@ -632,13 +714,13 @@ function GM:ShowOptions()
     but:DockMargin(12, 24, 12, 0)
     but:DockPadding(0, 12, 0, 12)
     but:Dock(TOP)
-    but.DoClick = function() menu:Remove() LocalPlayer().HadMenuOpen = false end
+    but.DoClick = function() menu:Remove() MySelf.HadMenuOpen = false end
 
     menu:InvalidateLayout(true)
     menu:SizeToChildren(false, true)
     menu:SetSize(menu:GetWide(), menu:GetTall() + 12)
     menu:MakePopup()
-    
+
     self.OptionsMenu = menu
 end
 
@@ -646,52 +728,55 @@ function GM:ShowHelp()
     if IsValid(self.objmenu) then
         self.objmenu:SetVisible(not self.objmenu:IsVisible())
         self.objmenuimage:SetVisible(not self.objmenuimage:IsVisible())
-        
+
         return
     end
-    
+
     local frame = vgui.Create("DPanel")
-    frame:SetWide(ScrW() * 0.75)
-    frame:SetTall(math.min(ScrH() - (ScrH() * 0.1), 900))
+    frame:SetWide(ScreenW * 0.75)
+    frame:SetTall(math.min(ScreenH - (ScreenH * 0.1), 900))
     frame:Center()
     frame:MakePopup()
-    
+
     frame.Paint = function(self, w, h)
         draw.RoundedBoxEx(8, 0, 64, w, h - 64, Color(5, 5, 5, 180), false, false, true, true)
         draw.RoundedBoxEx(8, 0, 0, w, 64, Color(5, 5, 5, 220), true, true, false, false)
     end
-    
+
     local sprite = vgui.Create("DImage", frame)
     sprite:AlignTop(-5)
     sprite:AlignLeft(5)
-    sprite:SetSize(ScrW() * 0.07, ScrH() * 0.07)
+    sprite:SetSize(ScreenW * 0.07, ScreenH * 0.07)
     sprite:SetImage("vgui/gfx/vgui/hl2mp_logo")
-    
+
     local pan = vgui.Create("DPanel", frame)
     pan:SetPos(frame:GetWide() * 0.08, frame:GetTall() * 0.08)
     pan:SetSize(frame:GetWide() * 0.85, frame:GetTall() * 0.85)
-    pan.Paint = function(self, w, h) 
+    pan.Paint = function(self, w, h)
         draw.RoundedBox(8, 0, 0, w, h, Color(24, 24, 24))
     end
-    
+
     local label = Label(translate.Get("title_objectives"), frame)
     label:SetFont("zm_hud_font_normal")
     label:SizeToContents()
     label:AlignLeft(frame:GetWide() * 0.1)
     label:AlignTop(frame:GetTall() * 0.01)
-    
+
     local scroll = vgui.Create("DScrollPanel", pan)
     scroll:SetSize(pan:GetWide() - 5, pan:GetTall() - 5)
-    
-    local lab = vgui.Create("DLabel", scroll)
+
+    local lab = vgui.Create("RichText", scroll)
     lab:SetSize(scroll:GetSize())
-    lab:SetFont("OptionsHelpBig")
     lab:AlignTop(8)
     lab:AlignLeft(8)
-    lab:SetText(self.MapInfo or "")
-    lab:SetWrap(true)
-    lab:SetAutoStretchVertical(true)
-    
+    lab:AppendText(self.MapInfo or "")
+    lab:SetFontInternal("OptionsHelpBig")
+    lab:SetFGColor(Color(255, 255, 255))
+    lab.PerformLayout = function(self)
+        self:SetFontInternal("OptionsHelpBig")
+        self:SetFGColor(Color(255, 255, 255))
+    end
+
     local hoverColor = Color(0, 0, 0)
     local but = vgui.Create("DButton", frame)
     but:SetFont("OptionsHelpBig")
@@ -704,7 +789,7 @@ function GM:ShowHelp()
         frame:SetVisible(false)
         sprite:SetVisible(false)
     end
-    but.Paint = function(self, w, h) 
+    but.Paint = function(self, w, h)
         draw.OutlinedBox(0, 0, w, h, 2, Color(46, 46, 46))
         if self:IsHovered() then
             hoverColor = Color(40, 0, 0, 200)
@@ -714,7 +799,7 @@ function GM:ShowHelp()
         surface.SetDrawColor(hoverColor)
         surface.DrawRect(2, 2, w - 3, h - 3)
     end
-    
+
     self.objmenu = frame
     self.objmenuimage = sprite
 end
@@ -729,7 +814,7 @@ function GM:MakePreferredMenu()
     frame.btnMinim:SetVisible(false)
     frame.btnMaxim:SetVisible(false)
     frame:MakePopup()
-    
+
     local label = vgui.Create("DLabel", frame)
     label:AlignTop(45)
     label:SetFont("OptionsHelpBig")
@@ -737,12 +822,12 @@ function GM:MakePreferredMenu()
     label:SetTextColor(color_white)
     label:SizeToContents()
     label:CenterHorizontal()
-    
+
     local pan = vgui.Create("Panel", frame)
     pan:MoveBelow(label, 10)
     pan:SetSize(frame:GetWide() * 0.85, frame:GetTall() * 0.5)
     pan:Center()
-    
+
     local but = vgui.Create("DButton", pan)
     but:Dock(TOP)
     but:DockMargin(0, 4, 0, 4)
@@ -756,7 +841,7 @@ function GM:MakePreferredMenu()
         surface.PlaySound("buttons/combine_button1.wav")
         frame:Close()
     end
-    
+
     local but = vgui.Create("DButton", pan)
     but:Dock(TOP)
     but:DockMargin(0, 4, 0, 4)
@@ -770,7 +855,7 @@ function GM:MakePreferredMenu()
         surface.PlaySound("buttons/combine_button1.wav")
         frame:Close()
     end
-    
+
     local but = vgui.Create("DButton", pan)
     but:Dock(TOP)
     but:DockMargin(0, 4, 0, 4)
@@ -784,7 +869,7 @@ function GM:MakePreferredMenu()
         surface.PlaySound("buttons/combine_button1.wav")
         frame:Close()
     end
-    
+
     local check = vgui.Create("DCheckBoxLabel", frame)
     check:AlignBottom(25)
     check:CenterHorizontal()
@@ -792,7 +877,7 @@ function GM:MakePreferredMenu()
     check:SetConVar("zm_nopreferredmenu")
     check:SetTextColor(color_white)
     check:SizeToContents()
-    
+
     GAMEMODE.PreferredMenu = frame
 end
 
@@ -809,7 +894,7 @@ local function trapMenuPaint(self, w, h)
         boxColor = Color(115, 0, 0)
         surfaceColor = Color(52, 0, 0, 250)
     end
-    
+
     draw.OutlinedBox(0, 0, w, h, 2, boxColor)
     surface.SetDrawColor(surfaceColor)
     surface.DrawRect(2, 2, w - 3, h - 3)
@@ -819,12 +904,12 @@ function GM:SpawnTrapMenu(class, ent)
         if IsValid(self.trapMenu) then
             self.trapMenu:Remove()
         end
-        
+
         if trapEntity then
             trapEntity:Remove()
             trapEntity = nil
         end
-        
+
         local trapPanel = vgui.Create("DFrame")
         trapPanel:SetWide(326.4)
         trapPanel:SetTall(345)
@@ -840,23 +925,25 @@ function GM:SpawnTrapMenu(class, ent)
             self.lblTitle:SetWide(self:GetWide() - 25)
             self.lblTitle:SetPos(12, 8)
         end
-        
+
         trapPanel.lblTitle:SetFont("OptionsHelp")
-            
+
         trapPanel.Close = function(self)
             self:SetVisible(false)
             trapPanel = nil
-                
+
             isDragging = false
             holdTime = CurTime()
         end
-        
+
         local description = vgui.Create("DLabel", trapPanel)
         description:AlignLeft(trapPanel:GetWide() * 0.12)
         description:AlignTop(trapPanel:GetTall() * 0.2)
+        description:SetWide(250)
+        description:SetAutoStretchVertical(true)
         description:SetText(ent:GetDescription())
-        description:SizeToContents()
-        
+        description:SetWrap(true)
+
         local cost = ent:GetCost()
         local activate = vgui.Create("DButton", trapPanel)
         activate:AlignLeft(trapPanel:GetWide() * 0.12)
@@ -870,13 +957,13 @@ function GM:SpawnTrapMenu(class, ent)
         activate.Paint = trapMenuPaint
         activate.Think = function(self)
             self.BaseClass.Think(self)
-            
-            if not LocalPlayer():CanAfford(cost) then
+
+            if not MySelf:CanAfford(cost) then
                 self:SetEnabled(false)
             else
                 self:SetEnabled(true)
             end
-            
+
             if self.bActive ~= not self.m_bDisabled then
                 self.bActive = not self.m_bDisabled
                 if not self.bActive then
@@ -891,16 +978,16 @@ function GM:SpawnTrapMenu(class, ent)
         activate.DoClick = function(self)
             isDragging = false
             holdTime = CurTime()
-            
-            if LocalPlayer():CanAfford(cost) then
+
+            if MySelf:CanAfford(cost) then
                 net.Start("zm_clicktrap")
                     net.WriteEntity(ent)
                 net.SendToServer()
-                
+
                 trapPanel:Close()
             end
         end
-        
+
         local trapCost = ent:GetTrapCost()
         local setTrigger = vgui.Create("DButton", trapPanel)
         setTrigger:AlignLeft(trapPanel:GetWide() * 0.12)
@@ -914,13 +1001,13 @@ function GM:SpawnTrapMenu(class, ent)
         setTrigger.Paint = trapMenuPaint
         setTrigger.Think = function(self)
             self.BaseClass.Think(self)
-            
-            if not LocalPlayer():CanAfford(trapCost) then
+
+            if not MySelf:CanAfford(trapCost) then
                 self:SetEnabled(false)
             else
                 self:SetEnabled(true)
             end
-            
+
             if self.bActive ~= not self.m_bDisabled then
                 self.bActive = not self.m_bDisabled
                 if not self.bActive then
@@ -935,13 +1022,13 @@ function GM:SpawnTrapMenu(class, ent)
         setTrigger.DoClick = function(self)
             isDragging = false
             holdTime = CurTime()
-            
-            if LocalPlayer():CanAfford(trapCost) then
+
+            if MySelf:CanAfford(trapCost) then
                 RunConsoleCommand("zm_power_trap", ent:EntIndex())
                 trapPanel:Close()
             end
         end
-        
+
         local cancel = vgui.Create("DButton", trapPanel)
         cancel:AlignLeft(trapPanel:GetWide() * 0.12)
         cancel:AlignTop(trapPanel:GetTall() * 0.85)
@@ -954,18 +1041,18 @@ function GM:SpawnTrapMenu(class, ent)
         cancel.DoClick = function(self)
             isDragging = false
             holdTime = CurTime()
-            
+
             trapPanel:Close()
         end
-        
+
         self.trapMenu = trapPanel
     elseif class == "info_zombiespawn" and ent:GetActive() then
         local data = hook.Call("GetZombieMenus", self)
         local menu = data[ent]
-        
+
         if not IsValid(menu) then
             local zombieFlags = ent:GetZombieFlags() or 0
-            
+
             local newMenu = vgui.Create("zm_zombiemenu")
             newMenu:SetZombieflags(zombieFlags)
             newMenu:SetTitle(translate.Get("title_spawn_menu"))
@@ -975,9 +1062,9 @@ function GM:SpawnTrapMenu(class, ent)
             newMenu:AlignLeft(10)
             newMenu:SetVisible(true)
             newMenu:ShowCloseButton(false)
-            
+
             TriggerEnt = ent
-            
+
             data[ent] = newMenu
         else
             menu:SetVisible(true)
@@ -987,8 +1074,8 @@ end
 
 function GM:HUDDrawPickupHistory()
     if self.PickupHistory == nil then return end
-    
-    local x, y = ScrW() - self.PickupHistoryWide - 20, self.PickupHistoryTop
+
+    local x, y = ScreenW - self.PickupHistoryWide - 20, self.PickupHistoryTop
     local tall = 0
     local wide = 0
 
@@ -999,61 +1086,61 @@ function GM:HUDDrawPickupHistory()
             self.PickupHistory[ k ] = nil
             return
         end
-    
+
         if v.time < CurTime() then
             if v.y == nil then v.y = y end
-            
+
             v.y = (v.y * 5 + y) / 6
-            
+
             local delta = (v.time + v.holdtime) - CurTime()
             delta = delta / v.holdtime
-            
+
             local alpha = 255
             local colordelta = math.Clamp(delta, 0.6, 0.7)
-            
+
             -- Fade in/out
             if (delta > 1 - v.fadein) then
                 alpha = math.Clamp((1.0 - delta) * (255 / v.fadein) , 0, 255)
             elseif delta < v.fadeout then
                 alpha = math.Clamp(delta * ( 255 / v.fadeout ), 0, 255)
             end
-            
+
             v.x = x + self.PickupHistoryWide - (self.PickupHistoryWide * (alpha / 255))
 
             local rx, ry, rw, rh = math.Round(v.x - 4), math.Round(v.y - (v.height / 2) - 4), math.Round(self.PickupHistoryWide + 9), math.Round(v.height + 8)
             local bordersize = 8
-            
+
             surface.SetTexture(self.PickupHistoryCorner)
-            
+
             surface.SetDrawColor(255, 0, 0, alpha)
             surface.DrawTexturedRectRotated(rx + bordersize/2, ry + bordersize / 2, bordersize, bordersize, 0)
             surface.DrawTexturedRectRotated(rx + bordersize/2, ry + rh -bordersize / 2, bordersize, bordersize, 90)
             surface.DrawRect(rx, ry + bordersize, bordersize, rh - bordersize * 2)
             surface.DrawRect(rx + bordersize, ry, v.height - 4, rh)
-            
+
             surface.SetDrawColor(150 * colordelta, 0, 0, alpha)
             surface.DrawRect(rx + bordersize + v.height - 4, ry, rw - (v.height - 4) - bordersize * 2, rh)
             surface.DrawTexturedRectRotated(rx + rw - bordersize / 2 , ry + rh - bordersize / 2, bordersize, bordersize, 180)
             surface.DrawTexturedRectRotated(rx + rw - bordersize / 2 , ry + bordersize / 2, bordersize, bordersize, 270)
             surface.DrawRect(rx + rw-bordersize, ry + bordersize, bordersize, rh-bordersize * 2)
-            
+
             draw.SimpleText(v.name, v.font, v.x + v.height + 9, v.y - (v.height / 2) + 1, Color(0, 0, 0, alpha * 0.5))
-    
+
             draw.SimpleText(v.name, v.font, v.x + v.height + 8, v.y - (v.height / 2), Color(255, 255, 255, alpha))
-            
+
             if v.amount then
                 draw.SimpleText(v.amount, v.font, v.x + self.PickupHistoryWide + 1, v.y - (v.height / 2) + 1, Color(0, 0, 0, alpha * 0.5), TEXT_ALIGN_RIGHT)
                 draw.SimpleText(v.amount, v.font, v.x + self.PickupHistoryWide, v.y - (v.height / 2), Color(255, 255, 255, alpha), TEXT_ALIGN_RIGHT)
             end
-            
+
             y = y + (v.height + 16)
             tall = tall + v.height + 18
             wide = math.Max(wide, v.width + v.height + 24)
-            
+
             if alpha == 0 then self.PickupHistory[ k ] = nil end
         end
     end
-    
-    self.PickupHistoryTop = (self.PickupHistoryTop * 5 + (ScrH() * 0.75 - tall ) / 2) / 6
+
+    self.PickupHistoryTop = (self.PickupHistoryTop * 5 + (ScreenH * 0.75 - tall ) / 2) / 6
     self.PickupHistoryWide = (self.PickupHistoryWide * 5 + wide) / 6
 end

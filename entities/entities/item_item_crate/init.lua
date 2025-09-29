@@ -7,16 +7,13 @@ ENT.bWasLarge = false
 
 function ENT:Initialize()
     self:SetModel("models/Items/item_item_crate.mdl")
-    self:PhysicsInit(SOLID_VPHYSICS)
-    self:SetSolid(SOLID_VPHYSICS)
-    self:SetMoveType(MOVETYPE_VPHYSICS)
-    self:SetUseType(SIMPLE_USE)
+    self:PrecacheGibs()
 
-    local phys = self:GetPhysicsObject()
-    if phys:IsValid() then
-        phys:EnableMotion(true)
-        phys:Wake()
-    end
+    self:SetCustomGroupAndFlags(ZS_COLLISIONGROUP_ITEMCRATE, ZS_COLLISIONFLAGS_ITEMCRATE, true)
+    self:SetCustomCollisionCheck(true)    
+
+    self:PhysicsInit(SOLID_VPHYSICS)
+    self:SetUseType(SIMPLE_USE)
     
     self:AddEFlags(EFL_NO_ROTORWASH_PUSH)
 
@@ -26,6 +23,16 @@ function ENT:Initialize()
     self.cratetype = self.cratetype or nil
     self.itemclass = self.itemclass or nil
     self.itemcount = self.itemcount or 0
+    
+    if self.itemclass ~= nil then
+        self:SetItemClass(self.itemclass)
+    end
+    
+    if self.itemcount ~= nil then
+        self:SetItemCount(self.itemcount)
+    end
+    
+    self:PhysWake()
 end
 
 function ENT:KeyValue(key, value)
@@ -36,11 +43,15 @@ function ENT:KeyValue(key, value)
         local ammotype = string.Replace(value, "_large", "")
         self.itemclass = ammotype or self.itemclass
         
+        self:SetItemClass(self.itemclass)
+        
         if string.find(value, "_large") then
+            self:SetLarge(true)
             bWasLarge = true
         end
     elseif key == "itemcount" then
         self.itemcount = tonumber(value)
+        self:SetItemCount(self.itemcount)
     end
 end
 
@@ -53,7 +64,7 @@ function ENT:AcceptInput(name, activator, caller, args)
 end
 
 function ENT:Use(activator, caller)
-    if self:IsPlayerHolding() or IsValid(caller.HeldObject) then return end
+    if self:IsPlayerHolding() or IsValid(caller.CarryProp) then return end
     
     if hook.Call("AllowPlayerPickup", GAMEMODE, caller, self) then
         caller:PickupObject(self)
@@ -111,22 +122,20 @@ function ENT:SetObjectHealth(health)
                 pSpawn:SetAngles(vecAngles)
                 
                 pSpawn:Spawn()
+                
+                timer.Simple(0, function()
+                    if not IsValid(pSpawn) then return end
+                    
+                    local phys = pSpawn:GetPhysicsObject()
+                    if not IsValid(phys) then return end
+                    
+                    phys:ApplyForceCenter(VectorRand() * Vector(1, 1, 0) * phys:GetMass() * 100)
+                    phys:ApplyForceCenter(vector_up * phys:GetMass() * 100)
+                end)
             end
         end
         
-        local ent = ents.Create("prop_physics")
-        if IsValid(ent) then
-            ent:SetModel(self:GetModel())
-            ent:SetMaterial(self:GetMaterial())
-            ent:SetAngles(self:GetAngles())
-            ent:SetPos(self:GetPos())
-            ent:SetSkin(self:GetSkin() or 0)
-            ent:SetColor(self:GetColor())
-            ent:Spawn()
-            ent:Fire("break", "", 0)
-            ent:Fire("kill", "", 0.1)
-        end
-        
+        self:GibBreakClient(self.LastDamageForce)
         self:Remove()
     end
 end
@@ -138,6 +147,7 @@ function ENT:OnTakeDamage(dmginfo)
 
     local attacker = dmginfo:GetAttacker()
     if not (attacker:IsValid() and attacker:IsPlayer() and attacker:Team() == TEAM_HUMAN) then
+        self.LastDamageForce = dmginfo:GetDamageForce()
         self:SetObjectHealth(self:GetObjectHealth() - dmginfo:GetDamage())
     end
 end

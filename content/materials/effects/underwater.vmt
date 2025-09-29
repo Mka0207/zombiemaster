@@ -1,0 +1,28 @@
+"Refract"
+{
+//	"$forceexpensive" 1
+	"$refracttexture" "_rt_WaterRefraction"
+
+	"$refractamount" ".1"
+	"$refracttint" "[1.2 1.2 1.2]"
+
+	"$normalmap" "dev/water_normal"
+
+	"Proxies"
+	{
+		"AnimatedTexture"
+		{
+			"animatedtexturevar" "$normalmap"
+			"animatedtextureframenumvar" "$bumpframe"
+			"animatedtextureframerate" 20.00
+		}
+
+		"TextureScroll"
+		{
+			"texturescrollvar" "$bumptransform"
+			"texturescrollrate" .01
+			"texturescrollangle" 90.00
+		}
+	}
+}
+
